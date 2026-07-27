@@ -36,6 +36,26 @@
 
 API доступен по адресу http://127.0.0.1:8000, Swagger UI - http://127.0.0.1:8000/docs.
 
+## Линтер
+
+```bash
+uv run ruff check .
+```
+
+## Pre-commit
+
+Установите hook после `uv sync`:
+
+```bash
+uv run pre-commit install
+```
+
+Перед каждым коммитом Ruff исправит поддерживаемые ошибки и отформатирует индексированные Python-файлы. Для ручного запуска hook на всех файлах:
+
+```bash
+uv run pre-commit run --all-files
+```
+
 ## Сервисы
 
 | Сервис | Адрес |
