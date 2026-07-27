@@ -1,4 +1,6 @@
 from logging.config import fileConfig
+import asyncio
+import sys
 
 from alembic import context
 from sqlalchemy import pool
@@ -6,6 +8,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.config import DATABASE_URL
 from app.models import Base
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 config = context.config
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
@@ -51,6 +56,4 @@ async def run_async_migrations() -> None:
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    import asyncio
-
     asyncio.run(run_async_migrations())
