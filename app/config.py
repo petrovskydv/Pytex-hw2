@@ -1,5 +1,15 @@
-DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:7432/postgres"
-REDIS_URL = "redis://localhost:7379/0"
-PAYMENT_API_URL = "http://localhost:9001"
-PROTECTION_API_URL = "http://localhost:9002"
-BOOKING_TTL_MINUTES = 15
+from pydantic import HttpUrl, PositiveInt, PostgresDsn, RedisDsn
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    database_url: PostgresDsn
+    redis_url: RedisDsn
+    payment_api_url: HttpUrl
+    protection_api_url: HttpUrl
+    booking_ttl_minutes: PositiveInt
+
+
+settings = Settings()
