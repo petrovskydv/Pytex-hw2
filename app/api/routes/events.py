@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.api.routes.dependencies import CurrentEventService, CurrentUserId
 from app.api.schemas import BookingCreate, CheckoutResponse, EventRead, EventSeatRead
-from app.domain.exceptions import SeatsUnavailableError
+from app.domain.exceptions import NotFoundError, SeatsUnavailableError
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -33,9 +33,10 @@ async def prepare_checkout(
     event_service: CurrentEventService,
 ) -> CheckoutResponse:
     """Временно бронирует места за клиентом и возвращает расчет checkout."""
-    # TODO: проверить что событие и места существуют, если нет вернуть ошибку
     try:
         await event_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
     except SeatsUnavailableError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected seats are unavailable") from None
 

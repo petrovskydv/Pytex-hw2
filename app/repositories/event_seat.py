@@ -25,6 +25,13 @@ class EventSeatRepository:
         event_seats = (await self._session.scalars(statement)).all()
         return [EventSeatDTO.model_validate(event_seat) for event_seat in event_seats]
 
+    async def get_existing_seat_ids(self, event_id: int, seat_ids: list[int]) -> set[int]:
+        statement = select(EventSeat.seat_id).where(
+            EventSeat.event_id == event_id,
+            EventSeat.seat_id.in_(seat_ids),
+        )
+        return set((await self._session.scalars(statement)).all())
+
     async def reserve(self, event_seat_ids: list[int], booking_id: int, reserved_until: datetime) -> None:
         statement = (
             update(EventSeat)

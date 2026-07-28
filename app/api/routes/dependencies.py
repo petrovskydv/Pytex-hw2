@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.infrastructure.database.db import get_session
 from app.repositories.booking import BookingRepository
+from app.repositories.event import EventRepository
 from app.repositories.event_seat import EventSeatRepository
 from app.services.events import EventService
 
@@ -27,6 +28,13 @@ def get_event_seat_repository(session: Session) -> EventSeatRepository:
 EventSeatRepositoryDependency = Annotated[EventSeatRepository, Depends(get_event_seat_repository)]
 
 
+def get_event_repository(session: Session) -> EventRepository:
+    return EventRepository(session)
+
+
+EventRepositoryDependency = Annotated[EventRepository, Depends(get_event_repository)]
+
+
 def get_booking_repository(session: Session) -> BookingRepository:
     return BookingRepository(session)
 
@@ -43,10 +51,11 @@ BookingTtlMinutes = Annotated[int, Depends(get_booking_ttl_minutes)]
 
 def get_event_service(
     booking_repository: BookingRepositoryDependency,
+    event_repository: EventRepositoryDependency,
     event_seat_repository: EventSeatRepositoryDependency,
     booking_ttl_minutes: BookingTtlMinutes,
 ) -> EventService:
-    return EventService(booking_repository, event_seat_repository, booking_ttl_minutes)
+    return EventService(booking_repository, event_repository, event_seat_repository, booking_ttl_minutes)
 
 
 CurrentEventService = Annotated[EventService, Depends(get_event_service)]
