@@ -17,6 +17,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff==0.12.2",
 ]
 
@@ -34,3 +36,7 @@ select = [
     "B",
     "SIM",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

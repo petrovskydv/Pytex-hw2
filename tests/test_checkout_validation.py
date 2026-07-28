@@ -1,34 +1,39 @@
-import unittest
+import pytest
 
 from app.domain.exceptions import EventNotFoundError, SeatsNotFoundError
 from app.services.events import EventService
 
 
-class CheckoutValidationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_rejects_missing_event(self) -> None:
-        service = EventService(None, _EventRepository(False), _EventSeatRepository(set()), 15)
+async def test_rejects_missing_event(checkout_database_manager) -> None:
+    service = EventService(checkout_database_manager(False, set()), 15)
 
-        with self.assertRaises(EventNotFoundError):
-            await service.create_checkout_booking(1, 1, [1])
-
-    async def test_rejects_missing_event_seat(self) -> None:
-        service = EventService(None, _EventRepository(True), _EventSeatRepository({1}), 15)
-
-        with self.assertRaises(SeatsNotFoundError):
-            await service.create_checkout_booking(1, 1, [1, 2])
+    with pytest.raises(EventNotFoundError):
+        await service.create_checkout_booking(1, 1, [1])
 
 
-class _EventRepository:
-    def __init__(self, exists: bool) -> None:
-        self._exists = exists
+async def test_rejects_missing_event_seat(checkout_database_manager) -> None:
+    service = EventService(checkout_database_manager(True, {1}), 15)
 
-    async def exists(self, event_id: int) -> bool:
-        return self._exists
+    with pytest.raises(SeatsNotFoundError):
+        await service.create_checkout_booking(1, 1, [1, 2])
 
 
-class _EventSeatRepository:
-    def __init__(self, seat_ids: set[int]) -> None:
-        self._seat_ids = seat_ids
+async def test_transaction_commits_on_success(database_with_session) -> None:
+    database, session = database_with_session
 
-    async def get_existing_seat_ids(self, event_id: int, seat_ids: list[int]) -> set[int]:
-        return self._seat_ids
+    async with database.transaction():
+        pass
+
+    assert session.commits == 1
+    assert session.rollbacks == 0
+
+
+async def test_transaction_rolls_back_on_error(database_with_session) -> None:
+    database, session = database_with_session
+
+    with pytest.raises(RuntimeError):
+        async with database.transaction():
+            raise RuntimeError
+
+    assert session.commits == 0
+    assert session.rollbacks == 1
