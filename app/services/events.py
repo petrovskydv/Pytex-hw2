@@ -14,12 +14,20 @@ class EventService:
         self._database = database
         self._booking_ttl_minutes = booking_ttl_minutes
 
+    async def _ensure_checkout_targets_exist(
+        self,
+        database: DatabaseManager,
+        event_id: int,
+        seat_ids: list[int],
+    ) -> None:
+        if not await database.events.exists(event_id):
+            raise EventNotFoundError
+        if await database.event_seats.get_existing_seat_ids(event_id, seat_ids) != set(seat_ids):
+            raise SeatsNotFoundError
+
     async def create_checkout_booking(self, event_id: int, user_id: int, seat_ids: list[int]) -> BookingDTO:
         async with self._database.transaction() as database:
-            if not await database.events.exists(event_id):
-                raise EventNotFoundError
-            if await database.event_seats.get_existing_seat_ids(event_id, seat_ids) != set(seat_ids):
-                raise SeatsNotFoundError
+            await self._ensure_checkout_targets_exist(database, event_id, seat_ids)
 
             event_seats: list[EventSeatDTO] = await database.event_seats.get_available_for_update(event_id, seat_ids)
             if len(event_seats) != len(seat_ids) or {seat.seat_id for seat in event_seats} != set(seat_ids):
