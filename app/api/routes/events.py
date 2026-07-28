@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.routers.dependencies import CurrentUserId
-from app.schemas import BookingCreate, CheckoutResponse, EventRead, EventSeatRead
+from app.api.routes.dependencies import CurrentUserId
+from app.api.schemas import BookingCreate, CheckoutResponse, EventRead, EventSeatRead
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -31,6 +31,12 @@ async def prepare_checkout(
     user_id: CurrentUserId,
 ) -> CheckoutResponse:
     """Временно бронирует места за клиентом и возвращает расчет checkout."""
+    # TODO: проверить что событие и места существуют, если нет вернуть ошибку
+    # TODO:
+    #  1. выбрать все не забронированные места из EventSeat по списку нужных мест
+    #  2. проверить что получены все нужные места, если нет вернуть ошибку
+    #  3. создать бронь в Booking, EventSeat
+
     # TODO: создать бронь для выбранных мест через SELECT FOR UPDATE, и посчитать базовую стоимость.
     # TODO: конкурентно запросить Payment API и Protection API для расчета checkout.
     ...

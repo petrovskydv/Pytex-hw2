@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import BookingStatus, SeatStatus
+from app.domain.statuses import BookingStatus, SeatStatus
 
 
 class LocationRead(BaseModel):

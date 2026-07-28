@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.routers.dependencies import CurrentUserId
-from app.schemas import PaymentCompleted, PaymentCreate
+from app.api.routes.dependencies import CurrentUserId
+from app.api.schemas import PaymentCompleted, PaymentCreate
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
