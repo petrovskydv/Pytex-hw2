@@ -1,10 +1,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from infrastructure.database.repositories.booking import BookingRepository
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.infrastructure.database.repositories.booking import BookingRepository
 from app.infrastructure.database.repositories.event import EventRepository
 from app.infrastructure.database.repositories.event_seat import EventSeatRepository
 
