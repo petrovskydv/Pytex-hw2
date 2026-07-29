@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from app.domain.dto import CheckoutDTO, CheckoutEventDTO, EventSeatDTO
+from app.domain.dto import CheckoutDTO, CheckoutEventDTO, EventSeatDTO, PaymentCalculationDTO, ProtectionCalculationDTO
 from app.domain.exceptions import EventNotFoundError, SeatsNotFoundError, SeatsUnavailableError
 from app.infrastructure.database.db import DatabaseManager
 
@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 class EventService:
+    """Создаёт бронирования и рассчитывает условия их оформления."""
+
     def __init__(
         self,
         database: DatabaseManager,
@@ -40,10 +42,36 @@ class EventService:
         event_id: int,
         seat_ids: list[int],
     ) -> None:
+        """Убедиться, что все указанные места существуют у события."""
         if await database.event_seats.get_existing_seat_ids(event_id, seat_ids) != set(seat_ids):
             raise SeatsNotFoundError
 
+    async def _calculate_checkout(
+        self,
+        booking_id: int,
+        amount: int,
+        event: CheckoutEventDTO,
+    ) -> tuple[PaymentCalculationDTO, ProtectionCalculationDTO | None]:
+        """Рассчитать платёж и страховку параллельно; отменить расчет страховки при ошибке расчета платежа."""
+        payment_task = asyncio.create_task(self._payment_client.calculate(booking_id, amount))
+        protection_task = asyncio.create_task(
+            self._protection_client.calculate(
+                booking_id,
+                amount,
+                event.category,
+                event.starts_at.isoformat(),
+            )
+        )
+        try:
+            payment = await payment_task
+        except BaseException:
+            protection_task.cancel()
+            await asyncio.gather(protection_task, return_exceptions=True)
+            raise
+        return payment, await protection_task
+
     async def create_checkout_booking(self, event_id: int, user_id: int, seat_ids: list[int]) -> CheckoutDTO:
+        """Зарезервировать места и сохранить расчёт условий оформления."""
         async with self._database.transaction() as database:
             event = await self._get_event(database, event_id)
             await self._ensure_checkout_seats_exist(database, event_id, seat_ids)
@@ -65,15 +93,7 @@ class EventService:
                 reserved_until=reserved_until,
             )
 
-        payment, protection = await asyncio.gather(
-            self._payment_client.calculate(booking.id, booking.amount),
-            self._protection_client.calculate(
-                booking.id,
-                booking.amount,
-                event.category,
-                event.starts_at.isoformat(),
-            ),
-        )
+        payment, protection = await self._calculate_checkout(booking.id, booking.amount, event)
         protection_price = protection.price if protection and protection.available else None
 
         await self._database.bookings.save_checkout_calculation(booking.id, payment.commission, protection_price)

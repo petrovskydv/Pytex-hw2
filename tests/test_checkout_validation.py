@@ -1,11 +1,12 @@
 import asyncio
+from datetime import datetime
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.routes.events import prepare_checkout
 from app.api.schemas import BookingCreate, CheckoutResponse
-from app.domain.dto import PaymentCalculationDTO, ProtectionCalculationDTO
+from app.domain.dto import CheckoutEventDTO, PaymentCalculationDTO, ProtectionCalculationDTO
 from app.domain.exceptions import EventNotFoundError, PaymentCalculationError, SeatsNotFoundError
 from app.services.events import EventService
 
@@ -134,3 +135,47 @@ async def test_payment_error_keeps_reserved_booking(
     assert len(database.bookings.created) == 1
     assert database.event_seats._available_seat_ids == set()
     assert database.bookings.calculations == []
+
+
+async def test_payment_error_cancels_protection_calculation(checkout_database_manager, monkeypatch) -> None:
+    protection_cancelled = asyncio.Event()
+
+    class FailingPaymentClient:
+        async def calculate(self, booking_id: int, amount: int) -> PaymentCalculationDTO:
+            raise PaymentCalculationError
+
+    class BlockingProtectionClient:
+        async def calculate(
+            self,
+            booking_id: int,
+            ticket_amount: int,
+            event_category: str,
+            event_starts_at: str,
+        ) -> ProtectionCalculationDTO:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                protection_cancelled.set()
+                raise
+
+    service = EventService(
+        checkout_database_manager(True, {1}),
+        15,
+        FailingPaymentClient(),
+        BlockingProtectionClient(),
+    )
+
+    async def get_event(*_) -> CheckoutEventDTO:
+        return CheckoutEventDTO(
+            id=1,
+            title="Test event",
+            category="conference",
+            starts_at=datetime(2030, 1, 1),
+        )
+
+    monkeypatch.setattr(service, "_get_event", get_event)
+
+    with pytest.raises(PaymentCalculationError):
+        await service.create_checkout_booking(1, 1, [1])
+
+    assert protection_cancelled.is_set()
