@@ -7,12 +7,32 @@ from app.api.schemas import (
     CheckoutResponse,
     EventRead,
     EventSeatRead,
-    PaymentCalculation,
-    ProtectionCalculation,
 )
 from app.domain.exceptions import NotFoundError, PaymentCalculationError, SeatsUnavailableError
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+PREPARE_CHECKOUT_RESPONSES = {
+    status.HTTP_404_NOT_FOUND: {
+        "description": "Мероприятие или выбранные места не найдены",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "event_not_found": {"value": {"detail": "Event not found"}},
+                    "seats_not_found": {"value": {"detail": "Selected seats not found"}},
+                }
+            }
+        },
+    },
+    status.HTTP_409_CONFLICT: {
+        "description": "Хотя бы одно выбранное место недоступно",
+        "content": {"application/json": {"example": {"detail": "Selected seats are unavailable"}}},
+    },
+    status.HTTP_503_SERVICE_UNAVAILABLE: {
+        "description": "Не удалось рассчитать стоимость оплаты",
+        "content": {"application/json": {"example": {"detail": "PaymentDeps calculation is unavailable"}}},
+    },
+}
 
 
 @router.get("")
@@ -33,7 +53,16 @@ async def list_event_seats(event_id: int) -> list[EventSeatRead]:
     ...
 
 
-@router.post("/{event_id}/checkout")
+@router.post(
+    "/{event_id}/checkout",
+    summary="Бронирование мест",
+    description=(
+        "Резервирует выбранные места на определенное время и возвращает стоимость оплаты. "
+        "Все суммы указаны в копейках. Расчет защиты может отсутствовать, если сервис "
+        "защиты недоступен или защита недоступна для мероприятия."
+    ),
+    responses=PREPARE_CHECKOUT_RESPONSES,
+)
 async def prepare_checkout(
     event_id: int,
     payload: BookingCreate,
@@ -66,8 +95,6 @@ async def prepare_checkout(
             with_protection=False,
             reserved_until=checkout.booking.reserved_until,
         ),
-        payment=PaymentCalculation.model_validate(checkout.payment.model_dump()),
-        protection=(
-            ProtectionCalculation.model_validate(checkout.protection.model_dump()) if checkout.protection else None
-        ),
+        payment=checkout.payment.model_dump(),
+        protection=checkout.protection.model_dump() if checkout.protection else None,
     )
