@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.dto import BookingDTO
-from app.infrastructure.database.models import Booking
+from app.domain.dto import BookingDTO, SalesDashboardDTO
+from app.domain.statuses import BookingStatus, SeatStatus
+from app.infrastructure.database.models import Booking, EventSeat
 
 
 class BookingRepository:
@@ -40,3 +41,23 @@ class BookingRepository:
             )
         )
         await self._session.execute(statement)
+
+    async def get_sales_dashboard(self, event_id: int) -> SalesDashboardDTO:
+        sold_tickets = (
+            select(func.count(EventSeat.id))
+            .where(EventSeat.event_id == event_id, EventSeat.status == SeatStatus.sold)
+            .scalar_subquery()
+        )
+        statement = select(
+            func.count(Booking.id).filter(Booking.status == BookingStatus.paid),
+            func.coalesce(sold_tickets, 0),
+            func.coalesce(func.sum(Booking.amount).filter(Booking.status == BookingStatus.paid), 0),
+            func.coalesce(func.round(func.avg(Booking.amount).filter(Booking.status == BookingStatus.paid)), 0),
+        ).where(Booking.event_id == event_id)
+        paid_orders, sold_tickets, revenue, average_order = (await self._session.execute(statement)).one()
+        return SalesDashboardDTO(
+            paid_orders=paid_orders,
+            sold_tickets=sold_tickets,
+            revenue=revenue,
+            average_order=average_order,
+        )

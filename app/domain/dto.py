@@ -51,3 +51,30 @@ class CheckoutDTO(BaseModel):
     seats: list[EventSeatDTO]
     payment: PaymentCalculationDTO
     protection: ProtectionCalculationDTO | None
+
+
+class DashboardEventDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    starts_at: datetime
+
+
+class SalesDashboardDTO(BaseModel):
+    paid_orders: int
+    sold_tickets: int
+    revenue: int
+    average_order: int
+
+
+class OccupancyDashboardDTO(BaseModel):
+    total: int
+    available: int
+    reserved: int
+    sold: int
+
+
+class EventDashboardDTO(BaseModel):
+    event: DashboardEventDTO
+    sales: SalesDashboardDTO
+    occupancy: OccupancyDashboardDTO

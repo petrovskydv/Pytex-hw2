@@ -6,6 +6,7 @@ from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.db import DatabaseManager, get_database_manager
+from app.services.dashboard import DashboardService
 from app.services.events import EventService
 
 
@@ -45,3 +46,10 @@ def get_event_service(
 
 
 EventServiceDeps = Annotated[EventService, Depends(get_event_service)]
+
+
+def get_dashboard_service(database: Database) -> DashboardService:
+    return DashboardService(database)
+
+
+DashboardServiceDeps = Annotated[DashboardService, Depends(get_dashboard_service)]
