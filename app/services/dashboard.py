@@ -20,7 +20,9 @@ class DashboardService:
             return await database.event_seats.get_occupancy_dashboard(event_id)
 
     async def get_dashboard(self, event_id: int, organizer_id: int) -> EventDashboardDTO:
-        event = await self._database.events.get_dashboard_event(event_id, organizer_id)
+        # Освобождаем соединение проверки владельца до запуска двух параллельных запросов.
+        async with self._database.transaction() as database:
+            event = await database.events.get_dashboard_event(event_id, organizer_id)
         if event is None:
             raise EventNotFoundError
 

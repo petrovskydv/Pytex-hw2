@@ -3,14 +3,16 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.routes.organizer import get_event_dashboard
 from app.domain.dto import OccupancyDashboardDTO, SalesDashboardDTO
 from app.domain.exceptions import EventNotFoundError
 from app.domain.statuses import BookingStatus, SeatStatus
+from app.infrastructure.database.db import DatabaseManager
 from app.infrastructure.database.models import Booking, Event, EventSeat, Seat
 from app.infrastructure.database.repositories.booking import BookingRepository
+from app.infrastructure.database.repositories.event import EventRepository
 from app.infrastructure.database.repositories.event_seat import EventSeatRepository
 from app.services.dashboard import DashboardService
 
@@ -155,3 +157,41 @@ async def test_dashboard_runs_aggregates_in_parallel_with_different_sessions(
     await task
 
     assert sessions[0] is not sessions[1]
+
+
+async def test_dashboard_releases_ownership_connections_before_parallel_queries(
+    postgres_url,
+    event_with_seat,
+    monkeypatch,
+) -> None:
+    """Проверка владельца не должна блокировать соединения для параллельных агрегатов."""
+    limited_engine = create_async_engine(postgres_url, pool_size=2, max_overflow=0)
+    limited_session_factory = async_sessionmaker(limited_engine, expire_on_commit=False)
+    ownership_checks_finished = asyncio.Event()
+    ownership_checks_count = 0
+    original_get_dashboard_event = EventRepository.get_dashboard_event
+
+    async def synchronized_get_dashboard_event(self, event_id, organizer_id):
+        nonlocal ownership_checks_count
+        event = await original_get_dashboard_event(self, event_id, organizer_id)
+        ownership_checks_count += 1
+        if ownership_checks_count == 2:
+            ownership_checks_finished.set()
+        await ownership_checks_finished.wait()
+        return event
+
+    monkeypatch.setattr(EventRepository, "get_dashboard_event", synchronized_get_dashboard_event)
+    event, _, _ = event_with_seat
+
+    try:
+        async with limited_session_factory() as first_session, limited_session_factory() as second_session:
+            services = (
+                DashboardService(DatabaseManager(first_session, limited_session_factory)),
+                DashboardService(DatabaseManager(second_session, limited_session_factory)),
+            )
+            await asyncio.wait_for(
+                asyncio.gather(*(service.get_dashboard(event.id, event.organizer_id) for service in services)),
+                timeout=1,
+            )
+    finally:
+        await limited_engine.dispose()
