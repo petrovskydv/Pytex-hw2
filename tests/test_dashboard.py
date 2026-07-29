@@ -10,8 +10,8 @@ from app.domain.dto import OccupancyDashboardDTO, SalesDashboardDTO
 from app.domain.exceptions import EventNotFoundError
 from app.domain.statuses import BookingStatus, SeatStatus
 from app.infrastructure.database.models import Booking, Event, EventSeat, Seat
-from app.repositories.booking import BookingRepository
-from app.repositories.event_seat import EventSeatRepository
+from app.infrastructure.database.repositories.booking import BookingRepository
+from app.infrastructure.database.repositories.event_seat import EventSeatRepository
 from app.services.dashboard import DashboardService
 
 
