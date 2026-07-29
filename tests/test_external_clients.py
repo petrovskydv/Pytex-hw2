@@ -2,8 +2,8 @@ import asyncio
 
 import httpx
 
-from app.infrastructure.payment import PaymentClient
-from app.infrastructure.protection import ProtectionClient
+from app.infrastructure.api_clients.payment import PaymentClient
+from app.infrastructure.api_clients.protection import ProtectionClient
 
 
 async def test_payment_retries_rate_limit(monkeypatch) -> None:
@@ -23,7 +23,32 @@ async def test_payment_retries_rate_limit(monkeypatch) -> None:
     async def no_sleep(delay: float) -> None:
         return None
 
-    monkeypatch.setattr("app.infrastructure.payment.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("app.infrastructure.api_clients.payment.asyncio.sleep", no_sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        quote = await PaymentClient(http_client, "http://payment").calculate(1, 5000)
+
+    assert calls == 2
+    assert quote.commission == 150
+
+
+async def test_payment_retries_network_error(monkeypatch) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("payment service unavailable", request=request)
+        return httpx.Response(
+            200,
+            json={"commission": 150, "total": 5150, "payment_methods": ["bank_card"]},
+            request=request,
+        )
+
+    async def no_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.infrastructure.api_clients.payment.asyncio.sleep", no_sleep)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         quote = await PaymentClient(http_client, "http://payment").calculate(1, 5000)
 
@@ -42,7 +67,7 @@ async def test_protection_timeout_returns_no_quote(monkeypatch) -> None:
     def short_timeout(delay: float):
         return original_timeout(0.01)
 
-    monkeypatch.setattr("app.infrastructure.protection.asyncio.timeout", short_timeout)
+    monkeypatch.setattr("app.infrastructure.api_clients.protection.asyncio.timeout", short_timeout)
     quote = await ProtectionClient(SlowHttpClient(), "http://protection").calculate(
         1,
         5000,

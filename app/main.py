@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import bookings, events, locations, organizer
 from app.config import settings
+from app.infrastructure.api_clients.payment import PaymentClient
+from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.add_event_data import add_event_data_to_db
-from app.infrastructure.payment import PaymentClient
-from app.infrastructure.protection import ProtectionClient
 
 
 @asynccontextmanager

@@ -49,7 +49,7 @@ async def prepare_checkout(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected seats are unavailable") from None
     except PaymentCalculationError:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="PaymentDeps calculation is unavailable",
         ) from None
 

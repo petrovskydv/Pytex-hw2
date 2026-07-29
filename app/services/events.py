@@ -7,8 +7,8 @@ from app.domain.exceptions import EventNotFoundError, SeatsNotFoundError, SeatsU
 from app.infrastructure.database.db import DatabaseManager
 
 if TYPE_CHECKING:
-    from app.infrastructure.payment import PaymentClient
-    from app.infrastructure.protection import ProtectionClient
+    from app.infrastructure.api_clients.payment import PaymentClient
+    from app.infrastructure.api_clients.protection import ProtectionClient
 
 
 class EventService:

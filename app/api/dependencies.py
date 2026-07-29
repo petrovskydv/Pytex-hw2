@@ -3,9 +3,9 @@ from typing import Annotated
 from fastapi import Depends, Header, Request
 
 from app.config import settings
+from app.infrastructure.api_clients.payment import PaymentClient
+from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.db import DatabaseManager, get_database_manager
-from app.infrastructure.payment import PaymentClient
-from app.infrastructure.protection import ProtectionClient
 from app.services.events import EventService
 
 
