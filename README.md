@@ -42,6 +42,14 @@ API доступен по адресу http://127.0.0.1:8000, Swagger UI - http:
 uv run ruff check .
 ```
 
+## Тесты
+
+После `uv sync` запустите:
+
+```bash
+uv run pytest
+```
+
 ## Pre-commit
 
 Установите hook после `uv sync`:

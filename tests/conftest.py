@@ -33,6 +33,7 @@ class FakeDatabaseManager:
         self.bookings = FakeBookingRepository()
         self._lock = asyncio.Lock()
         self.transaction_count = 0
+        self.commit_count = 0
 
     @asynccontextmanager
     async def transaction(self):
@@ -40,12 +41,15 @@ class FakeDatabaseManager:
             self.transaction_count += 1
             yield self
 
+    async def commit(self) -> None:
+        self.commit_count += 1
+
 
 class FakeEventRepository:
     def __init__(self, exists: bool) -> None:
         self._exists = exists
 
-    async def get_for_checkout(self, event_id: int) -> CheckoutEventDTO | None:
+    async def get_by_id(self, event_id: int) -> CheckoutEventDTO | None:
         if not self._exists:
             return None
         return CheckoutEventDTO(

@@ -56,7 +56,8 @@ async def test_checkout_saves_payment_and_protection_calculation(
 
     checkout = await service.create_checkout_booking(1, 1, [1])
 
-    assert database.transaction_count == 2
+    assert database.transaction_count == 1
+    assert database.commit_count == 1
     assert database.bookings.calculations == [(1, 150, 350)]
     assert checkout.payment.total == 5150
     assert checkout.protection is not None
