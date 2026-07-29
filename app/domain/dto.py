@@ -31,14 +31,14 @@ class CheckoutEventDTO(BaseModel):
     starts_at: datetime
 
 
-class PaymentQuoteDTO(BaseModel):
+class PaymentCalculationDTO(BaseModel):
     commission: int
     total: int
     payment_methods: list[str]
     expires_at: datetime | None = None
 
 
-class ProtectionQuoteDTO(BaseModel):
+class ProtectionCalculationDTO(BaseModel):
     available: bool
     price: int
     covered_amount: int
@@ -49,5 +49,5 @@ class CheckoutDTO(BaseModel):
     booking: BookingDTO
     event: CheckoutEventDTO
     seats: list[EventSeatDTO]
-    payment: PaymentQuoteDTO
-    protection: ProtectionQuoteDTO | None
+    payment: PaymentCalculationDTO
+    protection: ProtectionCalculationDTO | None

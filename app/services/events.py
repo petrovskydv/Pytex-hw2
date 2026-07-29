@@ -76,7 +76,7 @@ class EventService:
         )
         protection_price = protection.price if protection and protection.available else None
 
-        await self._database.bookings.save_checkout_quote(booking.id, payment.commission, protection_price)
+        await self._database.bookings.save_checkout_calculation(booking.id, payment.commission, protection_price)
         await self._database.commit()
 
         return CheckoutDTO(

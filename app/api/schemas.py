@@ -91,14 +91,14 @@ class EventDashboard(BaseModel):
     occupancy: OccupancyDashboard
 
 
-class PaymentQuote(BaseModel):
+class PaymentCalculation(BaseModel):
     commission: int
     total: int
     payment_methods: list[str]
     expires_at: datetime | None = None
 
 
-class ProtectionQuote(BaseModel):
+class ProtectionCalculation(BaseModel):
     available: bool
     price: int
     covered_amount: int
@@ -119,8 +119,8 @@ class CheckoutBooking(BaseModel):
 
 class CheckoutResponse(BaseModel):
     booking: CheckoutBooking
-    payment: PaymentQuote
-    protection: ProtectionQuote | None
+    payment: PaymentCalculation
+    protection: ProtectionCalculation | None
 
 
 class PaymentCreate(BaseModel):

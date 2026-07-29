@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from app.api.routes.events import prepare_checkout
 from app.api.schemas import BookingCreate, CheckoutResponse
-from app.domain.dto import PaymentQuoteDTO, ProtectionQuoteDTO
+from app.domain.dto import PaymentCalculationDTO, ProtectionCalculationDTO
 from app.domain.exceptions import EventNotFoundError, PaymentCalculationError, SeatsNotFoundError
 from app.services.events import EventService
 
@@ -45,7 +45,7 @@ async def test_transaction_rolls_back_on_error(database_with_session) -> None:
     assert session.rollbacks == 1
 
 
-async def test_checkout_saves_payment_and_protection_quote(
+async def test_checkout_saves_payment_and_protection_calculation(
     checkout_database_manager,
     payment_client,
     protection_client,
@@ -56,7 +56,7 @@ async def test_checkout_saves_payment_and_protection_quote(
     checkout = await service.create_checkout_booking(1, 1, [1])
 
     assert database.transaction_count == 2
-    assert database.bookings.quotes == [(1, 150, 350)]
+    assert database.bookings.calculations == [(1, 150, 350)]
     assert checkout.payment.total == 5150
     assert checkout.protection is not None
 
@@ -87,10 +87,10 @@ async def test_payment_and_protection_start_in_parallel(checkout_database_manage
     release = asyncio.Event()
 
     class BlockingPaymentClient:
-        async def calculate(self, booking_id: int, amount: int) -> PaymentQuoteDTO:
+        async def calculate(self, booking_id: int, amount: int) -> PaymentCalculationDTO:
             payment_started.set()
             await release.wait()
-            return PaymentQuoteDTO(commission=150, total=amount + 150, payment_methods=["bank_card"])
+            return PaymentCalculationDTO(commission=150, total=amount + 150, payment_methods=["bank_card"])
 
     class BlockingProtectionClient:
         async def calculate(
@@ -99,10 +99,10 @@ async def test_payment_and_protection_start_in_parallel(checkout_database_manage
             ticket_amount: int,
             event_category: str,
             event_starts_at: str,
-        ) -> ProtectionQuoteDTO:
+        ) -> ProtectionCalculationDTO:
             protection_started.set()
             await release.wait()
-            return ProtectionQuoteDTO(available=True, price=350, covered_amount=ticket_amount)
+            return ProtectionCalculationDTO(available=True, price=350, covered_amount=ticket_amount)
 
     service = EventService(
         checkout_database_manager(True, {1}),
@@ -122,7 +122,7 @@ async def test_payment_error_keeps_reserved_booking(
     protection_client,
 ) -> None:
     class FailingPaymentClient:
-        async def calculate(self, booking_id: int, amount: int) -> PaymentQuoteDTO:
+        async def calculate(self, booking_id: int, amount: int) -> PaymentCalculationDTO:
             raise PaymentCalculationError
 
     database = checkout_database_manager(True, {1})
@@ -133,4 +133,4 @@ async def test_payment_error_keeps_reserved_booking(
 
     assert len(database.bookings.created) == 1
     assert database.event_seats._available_seat_ids == set()
-    assert database.bookings.quotes == []
+    assert database.bookings.calculations == []

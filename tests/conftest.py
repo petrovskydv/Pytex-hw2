@@ -5,7 +5,13 @@ from datetime import datetime
 
 import pytest
 
-from app.domain.dto import BookingDTO, CheckoutEventDTO, EventSeatDTO, PaymentQuoteDTO, ProtectionQuoteDTO
+from app.domain.dto import (
+    BookingDTO,
+    CheckoutEventDTO,
+    EventSeatDTO,
+    PaymentCalculationDTO,
+    ProtectionCalculationDTO,
+)
 from app.infrastructure.database.db import DatabaseManager
 
 
@@ -72,7 +78,7 @@ class FakeEventSeatRepository:
 class FakeBookingRepository:
     def __init__(self) -> None:
         self.created: list[BookingDTO] = []
-        self.quotes: list[tuple[int, int, int | None]] = []
+        self.calculations: list[tuple[int, int, int | None]] = []
 
     async def create(self, event_id: int, user_id: int, amount: int, reserved_until: datetime) -> BookingDTO:
         booking = BookingDTO(
@@ -85,18 +91,18 @@ class FakeBookingRepository:
         self.created.append(booking)
         return booking
 
-    async def save_checkout_quote(
+    async def save_checkout_calculation(
         self,
         booking_id: int,
         payment_commission: int,
         protection_price: int | None,
     ) -> None:
-        self.quotes.append((booking_id, payment_commission, protection_price))
+        self.calculations.append((booking_id, payment_commission, protection_price))
 
 
 class FakePaymentClient:
-    async def calculate(self, booking_id: int, amount: int) -> PaymentQuoteDTO:
-        return PaymentQuoteDTO(
+    async def calculate(self, booking_id: int, amount: int) -> PaymentCalculationDTO:
+        return PaymentCalculationDTO(
             commission=150,
             total=amount + 150,
             payment_methods=["bank_card"],
@@ -110,8 +116,8 @@ class FakeProtectionClient:
         ticket_amount: int,
         event_category: str,
         event_starts_at: str,
-    ) -> ProtectionQuoteDTO:
-        return ProtectionQuoteDTO(
+    ) -> ProtectionCalculationDTO:
+        return ProtectionCalculationDTO(
             available=True,
             price=350,
             covered_amount=ticket_amount,

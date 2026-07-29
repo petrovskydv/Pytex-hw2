@@ -25,7 +25,7 @@ class BookingRepository:
         await self._session.flush()
         return BookingDTO.model_validate(booking)
 
-    async def save_checkout_quote(
+    async def save_checkout_calculation(
         self,
         booking_id: int,
         payment_commission: int,

@@ -7,8 +7,8 @@ from app.api.schemas import (
     CheckoutResponse,
     EventRead,
     EventSeatRead,
-    PaymentQuote,
-    ProtectionQuote,
+    PaymentCalculation,
+    ProtectionCalculation,
 )
 from app.domain.exceptions import NotFoundError, PaymentCalculationError, SeatsUnavailableError
 
@@ -66,6 +66,8 @@ async def prepare_checkout(
             with_protection=False,
             reserved_until=checkout.booking.reserved_until,
         ),
-        payment=PaymentQuote.model_validate(checkout.payment.model_dump()),
-        protection=ProtectionQuote.model_validate(checkout.protection.model_dump()) if checkout.protection else None,
+        payment=PaymentCalculation.model_validate(checkout.payment.model_dump()),
+        protection=(
+            ProtectionCalculation.model_validate(checkout.protection.model_dump()) if checkout.protection else None
+        ),
     )
