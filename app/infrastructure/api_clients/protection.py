@@ -1,4 +1,5 @@
 import asyncio
+from json import JSONDecodeError
 
 import httpx
 from pydantic import ValidationError
@@ -42,7 +43,7 @@ class ProtectionClient(BaseApiClient):
                 response = await self._retry_post(endpoint, payload)
                 response.raise_for_status()
                 return ProtectionCalculationDTO.model_validate(response.json())
-        except (TimeoutError, httpx.HTTPError, RetryError, ValidationError):
+        except (TimeoutError, httpx.HTTPError, RetryError, JSONDecodeError, ValidationError):
             return None
 
     @retry(

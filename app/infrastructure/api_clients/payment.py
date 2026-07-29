@@ -1,4 +1,5 @@
 import asyncio
+from json import JSONDecodeError
 
 import httpx
 from pydantic import ValidationError
@@ -30,7 +31,7 @@ class PaymentClient(BaseApiClient):
             response = await self._retry_post(endpoint, payload)
             response.raise_for_status()
             return PaymentCalculationDTO.model_validate(response.json())
-        except (httpx.HTTPError, RetryError, ValidationError) as error:
+        except (httpx.HTTPError, RetryError, JSONDecodeError, ValidationError) as error:
             raise PaymentCalculationError from error
 
     @retry(

@@ -1,7 +1,9 @@
 import asyncio
 
 import httpx
+import pytest
 
+from app.domain.exceptions import PaymentCalculationError
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
 
@@ -58,6 +60,17 @@ async def test_payment_retries_network_error(monkeypatch) -> None:
     assert payment_calculation.commission == 150
 
 
+async def test_payment_invalid_json_raises_calculation_error() -> None:
+    """Платежный клиент преобразует невалидный JSON в доменную ошибку."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="invalid", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.raises(PaymentCalculationError):
+            await PaymentClient(http_client, "http://payment").calculate(1, 5000)
+
+
 async def test_protection_retries_temporary_error(monkeypatch) -> None:
     """Клиент защиты повторяет запрос после временной ошибки 503."""
     calls = 0
@@ -88,6 +101,23 @@ async def test_protection_retries_temporary_error(monkeypatch) -> None:
     assert calls == 2
     assert protection_calculation is not None
     assert protection_calculation.price == 350
+
+
+async def test_protection_invalid_json_returns_no_calculation() -> None:
+    """Клиент защиты игнорирует невалидный JSON внешнего API."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="invalid", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        protection_calculation = await ProtectionClient(http_client, "http://protection").calculate(
+            1,
+            5000,
+            "conference",
+            "2030-01-01T00:00:00",
+        )
+
+    assert protection_calculation is None
 
 
 async def test_protection_timeout_returns_no_calculation(monkeypatch) -> None:
