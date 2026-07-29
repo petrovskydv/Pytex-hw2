@@ -18,3 +18,7 @@ class SeatsNotFoundError(NotFoundError):
     """Хотя бы одно из выбранных мест не найдено для мероприятия."""
 
     detail = "Selected seats not found"
+
+
+class PaymentCalculationError(Exception):
+    """Не удалось рассчитать стоимость оплаты."""

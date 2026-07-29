@@ -1,8 +1,16 @@
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.routes.dependencies import CurrentEventService, CurrentUserId
-from app.api.schemas import BookingCreate, CheckoutResponse, EventRead, EventSeatRead
-from app.domain.exceptions import NotFoundError, SeatsUnavailableError
+from app.api.dependencies import CurrentUserId, EventServiceDeps
+from app.api.schemas import (
+    BookingCreate,
+    CheckoutBooking,
+    CheckoutResponse,
+    EventRead,
+    EventSeatRead,
+    PaymentQuote,
+    ProtectionQuote,
+)
+from app.domain.exceptions import NotFoundError, PaymentCalculationError, SeatsUnavailableError
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -30,19 +38,34 @@ async def prepare_checkout(
     event_id: int,
     payload: BookingCreate,
     user_id: CurrentUserId,
-    event_service: CurrentEventService,
+    event_service: EventServiceDeps,
 ) -> CheckoutResponse:
     """Временно бронирует места за клиентом и возвращает расчет checkout."""
     try:
-        await event_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
+        checkout = await event_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
     except NotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
     except SeatsUnavailableError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Selected seats are unavailable") from None
+    except PaymentCalculationError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="PaymentDeps calculation is unavailable",
+        ) from None
 
-    # TODO:
-    #  3. создать бронь в Booking, EventSeat
-
-    # TODO: создать бронь для выбранных мест через SELECT FOR UPDATE, и посчитать базовую стоимость.
-    # TODO: конкурентно запросить Payment API и Protection API для расчета checkout.
-    ...
+    protection_price = checkout.protection.price if checkout.protection and checkout.protection.available else None
+    return CheckoutResponse(
+        booking=CheckoutBooking(
+            id=checkout.booking.id,
+            event_title=checkout.event.title,
+            starts_at=checkout.event.starts_at,
+            seats=[seat.model_dump() for seat in checkout.seats],
+            base_amount=checkout.booking.amount,
+            payment_commission=checkout.payment.commission,
+            protection_price=protection_price,
+            with_protection=False,
+            reserved_until=checkout.booking.reserved_until,
+        ),
+        payment=PaymentQuote.model_validate(checkout.payment.model_dump()),
+        protection=ProtectionQuote.model_validate(checkout.protection.model_dump()) if checkout.protection else None,
+    )

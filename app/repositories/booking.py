@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.dto import BookingDTO
@@ -23,3 +24,19 @@ class BookingRepository:
         self._session.add(booking)
         await self._session.flush()
         return BookingDTO.model_validate(booking)
+
+    async def save_checkout_quote(
+        self,
+        booking_id: int,
+        payment_commission: int,
+        protection_price: int | None,
+    ) -> None:
+        statement = (
+            update(Booking)
+            .where(Booking.id == booking_id)
+            .values(
+                payment_commission=payment_commission,
+                protection_price=protection_price,
+            )
+        )
+        await self._session.execute(statement)
