@@ -7,6 +7,7 @@ from app.infrastructure.api_clients.protection import ProtectionClient
 
 
 async def test_payment_retries_rate_limit(monkeypatch) -> None:
+    """Платежный клиент повторяет запрос после ответа 429."""
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -32,6 +33,7 @@ async def test_payment_retries_rate_limit(monkeypatch) -> None:
 
 
 async def test_payment_retries_network_error(monkeypatch) -> None:
+    """Платежный клиент повторяет запрос после сетевой ошибки."""
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -57,6 +59,7 @@ async def test_payment_retries_network_error(monkeypatch) -> None:
 
 
 async def test_protection_retries_temporary_error(monkeypatch) -> None:
+    """Клиент защиты повторяет запрос после временной ошибки 503."""
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -88,10 +91,11 @@ async def test_protection_retries_temporary_error(monkeypatch) -> None:
 
 
 async def test_protection_timeout_returns_no_calculation(monkeypatch) -> None:
-    class SlowHttpClient:
-        async def post(self, url: str, json: dict[str, object]) -> httpx.Response:
-            await asyncio.Event().wait()
-            raise AssertionError("unreachable")
+    """Клиент защиты возвращает отсутствие расчета при превышении таймаута."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
 
     original_timeout = asyncio.timeout
 
@@ -99,11 +103,12 @@ async def test_protection_timeout_returns_no_calculation(monkeypatch) -> None:
         return original_timeout(0.01)
 
     monkeypatch.setattr("app.infrastructure.api_clients.protection.asyncio.timeout", short_timeout)
-    protection_calculation = await ProtectionClient(SlowHttpClient(), "http://protection").calculate(
-        1,
-        5000,
-        "conference",
-        "2030-01-01T00:00:00",
-    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        protection_calculation = await ProtectionClient(http_client, "http://protection").calculate(
+            1,
+            5000,
+            "conference",
+            "2030-01-01T00:00:00",
+        )
 
     assert protection_calculation is None

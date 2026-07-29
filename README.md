@@ -44,7 +44,7 @@ uv run ruff check .
 
 ## Тесты
 
-После `uv sync` запустите:
+Для тестов нужен запущенный Docker Desktop. Вручную запускать `db` и применять миграции не нужно: pytest создаст изолированный PostgreSQL-контейнер и применит Alembic-миграции.
 
 ```bash
 uv run pytest
