@@ -42,6 +42,14 @@ class BookingRepository:
         )
         await self._session.execute(statement)
 
+    async def cancel(self, booking_id: int) -> None:
+        statement = (
+            update(Booking)
+            .where(Booking.id == booking_id, Booking.status == BookingStatus.pending_payment)
+            .values(status=BookingStatus.cancelled)
+        )
+        await self._session.execute(statement)
+
     async def get_sales_dashboard(self, event_id: int) -> SalesDashboardDTO:
         sold_tickets = (
             select(func.count(EventSeat.id))

@@ -161,14 +161,14 @@ async def test_payment_and_protection_start_in_parallel(
     await checkout_task
 
 
-async def test_payment_error_keeps_reserved_booking(
+async def test_payment_error_cancels_booking_and_releases_seat(
     database_manager,
     event_with_seat,
     payment_client,
     protection_client,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Ошибка платежного сервиса не отменяет уже сохраненное резервирование."""
+    """Ошибка платежного сервиса отменяет бронь и освобождает место."""
     event, _, event_seat = event_with_seat
     payment_client.calculate.side_effect = PaymentCalculationError
     service = EventService(database_manager, 15, payment_client, protection_client)
@@ -182,9 +182,12 @@ async def test_payment_error_keeps_reserved_booking(
 
     assert len(bookings) == 1
     assert saved_event_seat is not None
-    assert saved_event_seat.status == SeatStatus.reserved
+    assert bookings[0].status == BookingStatus.cancelled
     assert bookings[0].payment_commission == 0
     assert bookings[0].protection_price is None
+    assert saved_event_seat.status == SeatStatus.available
+    assert saved_event_seat.booking_id is None
+    assert saved_event_seat.reserved_until is None
 
 
 async def test_payment_error_cancels_protection_calculation(

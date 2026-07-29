@@ -44,6 +44,14 @@ class EventSeatRepository:
         )
         await self._session.execute(statement)
 
+    async def release_reservation(self, booking_id: int) -> None:
+        statement = (
+            update(EventSeat)
+            .where(EventSeat.booking_id == booking_id, EventSeat.status == SeatStatus.reserved)
+            .values(status=SeatStatus.available, booking_id=None, reserved_until=None)
+        )
+        await self._session.execute(statement)
+
     async def get_occupancy_dashboard(self, event_id: int) -> OccupancyDashboardDTO:
         statement = select(
             func.coalesce(func.count(EventSeat.id), 0),

@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from app.domain.dto import CheckoutDTO, CheckoutEventDTO, EventSeatDTO, PaymentCalculationDTO, ProtectionCalculationDTO
-from app.domain.exceptions import EventNotFoundError, SeatsNotFoundError, SeatsUnavailableError
+from app.domain.exceptions import EventNotFoundError, PaymentCalculationError, SeatsNotFoundError, SeatsUnavailableError
 from app.infrastructure.database.db import DatabaseManager
 
 if TYPE_CHECKING:
@@ -93,7 +93,14 @@ class EventService:
                 reserved_until=reserved_until,
             )
 
-        payment, protection = await self._calculate_checkout(booking.id, booking.amount, event)
+        try:
+            payment, protection = await self._calculate_checkout(booking.id, booking.amount, event)
+        except PaymentCalculationError:
+            # Резерв уже сохранён, поэтому при ошибке расчёта освобождаем места отдельной транзакцией.
+            async with self._database.transaction() as database:
+                await database.bookings.cancel(booking.id)
+                await database.event_seats.release_reservation(booking.id)
+            raise
         protection_price = protection.price if protection and protection.available else None
 
         await self._database.bookings.save_checkout_calculation(booking.id, payment.commission, protection_price)
