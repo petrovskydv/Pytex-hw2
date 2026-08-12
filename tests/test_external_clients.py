@@ -4,8 +4,25 @@ import httpx
 import pytest
 
 from app.domain.exceptions import PaymentCalculationError
+from app.infrastructure.api_clients.base import BaseApiClient
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
+
+
+async def test_rate_limiter_limits_request_frequency() -> None:
+    """Ограничитель не возвращает токен до завершения интервала."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = BaseApiClient(http_client, "http://service", rate_limit_requests=1, rate_limit_interval=0.01)
+        await client._post("/resource", {})
+
+        started_at = asyncio.get_running_loop().time()
+        await client._post("/resource", {})
+
+    assert asyncio.get_running_loop().time() - started_at >= 0.009
 
 
 async def test_payment_retries_rate_limit(monkeypatch) -> None:
