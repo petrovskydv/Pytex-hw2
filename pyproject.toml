@@ -7,13 +7,39 @@ dependencies = [
     "alembic==1.16.2",
     "fastapi==0.116.1",
     "greenlet==3.2.3",
+    "httpx>=0.28.1",
     "psycopg[binary,pool]==3.2.9",
+    "pydantic-settings>=2.14.2",
     "reportlab>=5.0.0",
     "sqlalchemy==2.0.41",
+    "tenacity>=9.0.0",
     "uvicorn[standard]==0.35.0",
 ]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.6.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff==0.12.2",
+    "testcontainers[postgres]>=4.14.0",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from app.models import BookingStatus, SeatStatus
+from app.domain.statuses import BookingStatus, SeatStatus
 
 
 class LocationRead(BaseModel):
@@ -81,7 +81,12 @@ class OccupancyDashboard(BaseModel):
     available: int
     reserved: int
     sold: int
-    occupancy_percent: float
+
+    @computed_field
+    @property
+    def occupancy_percent(self) -> float:
+        """Возвращает процент занятых мест."""
+        return (self.reserved + self.sold) / self.total * 100 if self.total else 0.0
 
 
 class EventDashboard(BaseModel):
@@ -91,14 +96,14 @@ class EventDashboard(BaseModel):
     occupancy: OccupancyDashboard
 
 
-class PaymentQuote(BaseModel):
+class PaymentCalculation(BaseModel):
     commission: int
     total: int
     payment_methods: list[str]
     expires_at: datetime | None = None
 
 
-class ProtectionQuote(BaseModel):
+class ProtectionCalculation(BaseModel):
     available: bool
     price: int
     covered_amount: int
@@ -119,8 +124,8 @@ class CheckoutBooking(BaseModel):
 
 class CheckoutResponse(BaseModel):
     booking: CheckoutBooking
-    payment: PaymentQuote
-    protection: ProtectionQuote | None
+    payment: PaymentCalculation
+    protection: ProtectionCalculation | None
 
 
 class PaymentCreate(BaseModel):
