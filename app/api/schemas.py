@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.domain.statuses import BookingStatus, SeatStatus
 
@@ -81,7 +81,12 @@ class OccupancyDashboard(BaseModel):
     available: int
     reserved: int
     sold: int
-    occupancy_percent: float
+
+    @computed_field
+    @property
+    def occupancy_percent(self) -> float:
+        """Возвращает процент занятых мест."""
+        return (self.reserved + self.sold) / self.total * 100 if self.total else 0.0
 
 
 class EventDashboard(BaseModel):

@@ -71,14 +71,9 @@ async def get_event_dashboard(
     except EventNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
 
-    occupancy_percent = (
-        (dashboard.occupancy.reserved + dashboard.occupancy.sold) / dashboard.occupancy.total * 100
-        if dashboard.occupancy.total
-        else 0.0
-    )
     return EventDashboard(
         event_title=dashboard.event.title,
         starts_at=dashboard.event.starts_at,
         sales=dashboard.sales.model_dump(),
-        occupancy={**dashboard.occupancy.model_dump(), "occupancy_percent": occupancy_percent},
+        occupancy=dashboard.occupancy.model_dump(),
     )
