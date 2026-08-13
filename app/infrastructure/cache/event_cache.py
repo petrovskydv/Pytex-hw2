@@ -43,7 +43,7 @@ class EventCache:
                 yield acquired
             finally:
                 if acquired:
-                    with suppress(LockNotOwnedError, RedisError):
+                    with suppress(LockNotOwnedError):
                         await lock.release()
         except RedisError as error:
             raise EventCacheUnavailableError from error

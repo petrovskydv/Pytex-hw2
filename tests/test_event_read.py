@@ -48,6 +48,16 @@ class RedisErrorFakeRedis(FakeRedis):
         raise RedisError
 
 
+class ReleaseErrorFakeLock(FakeLock):
+    async def release(self) -> None:
+        raise RedisError
+
+
+class ReleaseErrorFakeRedis(FakeRedis):
+    def lock(self, name: str, *, timeout: int) -> ReleaseErrorFakeLock:
+        return ReleaseErrorFakeLock(self, name)
+
+
 @pytest.fixture
 def event() -> EventDetailsDTO:
     return EventDetailsDTO(
@@ -198,3 +208,8 @@ async def test_invalid_cached_event_raises_cache_unavailable() -> None:
 async def test_redis_error_raises_cache_unavailable() -> None:
     with pytest.raises(EventCacheUnavailableError):
         await make_service(RedisErrorFakeRedis(), AsyncMock()).get_event(1)
+
+
+async def test_lock_release_error_raises_cache_unavailable(event: EventDetailsDTO) -> None:
+    with pytest.raises(EventCacheUnavailableError):
+        await make_service(ReleaseErrorFakeRedis(), AsyncMock(return_value=event)).get_event(1)
