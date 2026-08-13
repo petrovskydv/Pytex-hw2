@@ -58,7 +58,7 @@ class EventReadService:
 
                     try:
                         async with asyncio.timeout(self._database_timeout_seconds):
-                            event = await self._database.events.get_read_by_id(event_id)
+                            event = await self._database.events.get_by_id(event_id)
                     except TimeoutError as error:
                         raise EventLoadTimeoutError from error
                     if event is None:

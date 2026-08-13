@@ -34,7 +34,7 @@ class CheckoutService:
         event = await database.events.get_by_id(event_id)
         if event is None:
             raise EventNotFoundError
-        return event
+        return EventCheckoutDTO.model_validate(event)
 
     async def _ensure_checkout_seats_exist(
         self,

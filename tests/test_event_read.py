@@ -57,34 +57,34 @@ def event() -> EventDetailsDTO:
 
 def make_service(
     redis: FakeRedis,
-    get_read_by_id: AsyncMock,
+    get_by_id: AsyncMock,
     *,
     lock_wait_seconds: float = 1,
 ) -> EventReadService:
-    database = SimpleNamespace(events=SimpleNamespace(get_read_by_id=get_read_by_id))
+    database = SimpleNamespace(events=SimpleNamespace(get_by_id=get_by_id))
     return EventReadService(database, redis, 300, 15, 5, lock_wait_seconds)
 
 
 async def test_get_event_returns_cached_value_without_database_request(event: EventDetailsDTO) -> None:
     redis = FakeRedis()
     redis.values["events:1"] = event.model_dump_json()
-    get_read_by_id = AsyncMock()
+    get_by_id = AsyncMock()
 
-    result = await make_service(redis, get_read_by_id).get_event(1)
+    result = await make_service(redis, get_by_id).get_event(1)
 
     assert result == event
-    get_read_by_id.assert_not_awaited()
+    get_by_id.assert_not_awaited()
 
 
 async def test_get_event_caches_database_value(event: EventDetailsDTO) -> None:
     redis = FakeRedis()
-    get_read_by_id = AsyncMock(return_value=event)
+    get_by_id = AsyncMock(return_value=event)
 
-    result = await make_service(redis, get_read_by_id).get_event(1)
+    result = await make_service(redis, get_by_id).get_event(1)
 
     assert result == event
     assert EventDetailsDTO.model_validate_json(redis.values["events:1"]) == event
-    get_read_by_id.assert_awaited_once_with(1)
+    get_by_id.assert_awaited_once_with(1)
 
 
 async def test_concurrent_cache_miss_loads_event_once(event: EventDetailsDTO) -> None:
@@ -92,12 +92,12 @@ async def test_concurrent_cache_miss_loads_event_once(event: EventDetailsDTO) ->
     database_started = asyncio.Event()
     release_database = asyncio.Event()
 
-    async def get_read_by_id(event_id: int) -> EventDetailsDTO:
+    async def get_by_id(event_id: int) -> EventDetailsDTO:
         database_started.set()
         await release_database.wait()
         return event
 
-    database_method = AsyncMock(side_effect=get_read_by_id)
+    database_method = AsyncMock(side_effect=get_by_id)
     service = make_service(redis, database_method)
     leader = asyncio.create_task(service.get_event(1))
     await database_started.wait()
@@ -134,12 +134,12 @@ async def test_different_events_use_independent_locks(event: EventDetailsDTO) ->
     database_started = asyncio.Event()
     release_database = asyncio.Event()
 
-    async def get_read_by_id(event_id: int) -> EventDetailsDTO:
+    async def get_by_id(event_id: int) -> EventDetailsDTO:
         database_started.set()
         await release_database.wait()
         return event.model_copy(update={"id": event_id})
 
-    database_method = AsyncMock(side_effect=get_read_by_id)
+    database_method = AsyncMock(side_effect=get_by_id)
     service = make_service(redis, database_method)
     first = asyncio.create_task(service.get_event(1))
     await database_started.wait()
@@ -165,12 +165,12 @@ async def test_cancelled_database_request_releases_lock() -> None:
     redis = FakeRedis()
     database_started = asyncio.Event()
 
-    async def get_read_by_id(event_id: int) -> EventDetailsDTO:
+    async def get_by_id(event_id: int) -> EventDetailsDTO:
         database_started.set()
         await asyncio.Event().wait()
         return EventDetailsDTO.model_construct()
 
-    task = asyncio.create_task(make_service(redis, AsyncMock(side_effect=get_read_by_id)).get_event(1))
+    task = asyncio.create_task(make_service(redis, AsyncMock(side_effect=get_by_id)).get_event(1))
     await database_started.wait()
     task.cancel()
 
