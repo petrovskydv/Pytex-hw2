@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from app.domain.dto import CheckoutDTO, CheckoutEventDTO, EventSeatDTO, PaymentCalculationDTO, ProtectionCalculationDTO
+from app.domain.dto import CheckoutDTO, EventCheckoutDTO, EventSeatDTO, PaymentCalculationDTO, ProtectionCalculationDTO
 from app.domain.exceptions import EventNotFoundError, PaymentCalculationError, SeatsNotFoundError, SeatsUnavailableError
 from app.infrastructure.database.db import DatabaseManager
 
@@ -30,7 +30,7 @@ class EventService:
         self,
         database: DatabaseManager,
         event_id: int,
-    ) -> CheckoutEventDTO:
+    ) -> EventCheckoutDTO:
         event = await database.events.get_by_id(event_id)
         if event is None:
             raise EventNotFoundError
@@ -50,7 +50,7 @@ class EventService:
         self,
         booking_id: int,
         amount: int,
-        event: CheckoutEventDTO,
+        event: EventCheckoutDTO,
     ) -> tuple[PaymentCalculationDTO, ProtectionCalculationDTO | None]:
         """Рассчитать платёж и страховку параллельно; отменить расчет страховки при ошибке расчета платежа."""
         payment_task = asyncio.create_task(self._payment_client.calculate(booking_id, amount))

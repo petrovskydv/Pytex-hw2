@@ -22,7 +22,7 @@ class EventSeatDTO(BaseModel):
     price: int
 
 
-class CheckoutEventDTO(BaseModel):
+class EventCheckoutDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -31,7 +31,7 @@ class CheckoutEventDTO(BaseModel):
     starts_at: datetime
 
 
-class EventReadDTO(BaseModel):
+class EventDetailsDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -60,7 +60,7 @@ class ProtectionCalculationDTO(BaseModel):
 
 class CheckoutDTO(BaseModel):
     booking: BookingDTO
-    event: CheckoutEventDTO
+    event: EventCheckoutDTO
     seats: list[EventSeatDTO]
     payment: PaymentCalculationDTO
     protection: ProtectionCalculationDTO | None

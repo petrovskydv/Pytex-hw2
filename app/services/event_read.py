@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import LockNotOwnedError, RedisError
 
-from app.domain.dto import EventReadDTO
+from app.domain.dto import EventDetailsDTO
 from app.domain.exceptions import EventCacheUnavailableError, EventLoadTimeoutError, EventNotFoundError
 from app.infrastructure.database.db import DatabaseManager
 
@@ -39,11 +39,11 @@ class EventReadService:
     def _lock_key(event_id: int) -> str:
         return f"locks:events:{event_id}"
 
-    async def _get_cached_event(self, event_id: int) -> EventReadDTO | None:
+    async def _get_cached_event(self, event_id: int) -> EventDetailsDTO | None:
         cached_event = await self._redis.get(self._cache_key(event_id))
-        return EventReadDTO.model_validate_json(cached_event) if cached_event else None
+        return EventDetailsDTO.model_validate_json(cached_event) if cached_event else None
 
-    async def get_event(self, event_id: int) -> EventReadDTO:
+    async def get_event(self, event_id: int) -> EventDetailsDTO:
         try:
             cached_event = await self._get_cached_event(event_id)
             if cached_event:
