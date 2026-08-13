@@ -15,15 +15,15 @@ from app.infrastructure.database.add_event_data import add_event_data_to_db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis = aioredis.from_url(
-        str(settings.redis_url),
-        socket_connect_timeout=settings.redis_socket_timeout_seconds,
-        socket_timeout=settings.redis_socket_timeout_seconds,
+        str(settings.redis.url),
+        socket_connect_timeout=settings.redis.socket_timeout_seconds,
+        socket_timeout=settings.redis.socket_timeout_seconds,
     )
     try:
         await redis.ping()
         async with httpx.AsyncClient() as http_client:
-            app.state.payment_client = PaymentClient(http_client, str(settings.payment_api_url))
-            app.state.protection_client = ProtectionClient(http_client, str(settings.protection_api_url))
+            app.state.payment_client = PaymentClient(http_client, str(settings.external_apis.payment_api_url))
+            app.state.protection_client = ProtectionClient(http_client, str(settings.external_apis.protection_api_url))
             app.state.redis = redis
             await add_event_data_to_db()
             yield

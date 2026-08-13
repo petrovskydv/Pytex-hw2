@@ -48,7 +48,7 @@ def get_event_service(
 ) -> EventService:
     return EventService(
         database,
-        settings.booking_ttl_minutes,
+        settings.booking.booking_ttl_minutes,
         payment_client,
         protection_client,
     )
@@ -61,10 +61,10 @@ def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadSer
     return EventReadService(
         database,
         redis,
-        settings.event_cache_ttl_seconds,
-        settings.event_lock_ttl_seconds,
-        settings.event_database_timeout_seconds,
-        settings.event_lock_wait_seconds,
+        settings.booking.event_cache_ttl_seconds,
+        settings.booking.event_lock_ttl_seconds,
+        settings.booking.event_database_timeout_seconds,
+        settings.booking.event_lock_wait_seconds,
     )
 
 

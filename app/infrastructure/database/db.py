@@ -8,7 +8,7 @@ from app.infrastructure.database.repositories.booking import BookingRepository
 from app.infrastructure.database.repositories.event import EventRepository
 from app.infrastructure.database.repositories.event_seat import EventSeatRepository
 
-engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
+engine = create_async_engine(str(settings.database.url), pool_pre_ping=True)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 
