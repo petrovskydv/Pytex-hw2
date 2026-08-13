@@ -43,41 +43,45 @@ class EventReadService:
         cached_event = await self._redis.get(self._cache_key(event_id))
         return EventDetailsDTO.model_validate_json(cached_event) if cached_event else None
 
-    async def get_event(self, event_id: int) -> EventDetailsDTO:
+    async def _load_and_cache_event(self, event_id: int) -> EventDetailsDTO:
+        if cached_event := await self._get_cached_event(event_id):
+            return cached_event
+
         try:
+            async with asyncio.timeout(self._database_timeout_seconds):
+                event = await self._database.events.get_by_id(event_id)
+        except TimeoutError as error:
+            raise EventLoadTimeoutError from error
+        if event is None:
+            raise EventNotFoundError
+        await self._redis.set(
+            self._cache_key(event_id),
+            event.model_dump_json(),
+            ex=self._cache_ttl_seconds,
+        )
+        return event
+
+    async def _wait_for_cached_event(self, event_id: int) -> EventDetailsDTO:
+        for _ in range(int(self._lock_wait_seconds / EVENT_CACHE_POLL_SECONDS)):
+            await asyncio.sleep(EVENT_CACHE_POLL_SECONDS)
             cached_event = await self._get_cached_event(event_id)
             if cached_event:
+                return cached_event
+        raise EventLoadTimeoutError
+
+    async def get_event(self, event_id: int) -> EventDetailsDTO:
+        try:
+            if cached_event := await self._get_cached_event(event_id):
                 return cached_event
 
             lock = self._redis.lock(self._lock_key(event_id), timeout=self._lock_ttl_seconds)
             if await lock.acquire(blocking=False):
                 try:
-                    cached_event = await self._get_cached_event(event_id)
-                    if cached_event:
-                        return cached_event
-
-                    try:
-                        async with asyncio.timeout(self._database_timeout_seconds):
-                            event = await self._database.events.get_by_id(event_id)
-                    except TimeoutError as error:
-                        raise EventLoadTimeoutError from error
-                    if event is None:
-                        raise EventNotFoundError
-                    await self._redis.set(
-                        self._cache_key(event_id),
-                        event.model_dump_json(),
-                        ex=self._cache_ttl_seconds,
-                    )
-                    return event
+                    return await self._load_and_cache_event(event_id)
                 finally:
                     with suppress(LockNotOwnedError, RedisError):
                         await lock.release()
 
-            for _ in range(int(self._lock_wait_seconds / EVENT_CACHE_POLL_SECONDS)):
-                await asyncio.sleep(EVENT_CACHE_POLL_SECONDS)
-                cached_event = await self._get_cached_event(event_id)
-                if cached_event:
-                    return cached_event
-            raise EventLoadTimeoutError
+            return await self._wait_for_cached_event(event_id)
         except (RedisError, ValidationError) as error:
             raise EventCacheUnavailableError from error
