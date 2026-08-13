@@ -40,6 +40,17 @@ PREPARE_CHECKOUT_RESPONSES = {
     },
 }
 
+GET_EVENT_RESPONSES = {
+    status.HTTP_404_NOT_FOUND: {
+        "description": "Мероприятие с указанным идентификатором не найдено",
+        "content": {"application/json": {"example": {"detail": "Event not found"}}},
+    },
+    status.HTTP_503_SERVICE_UNAVAILABLE: {
+        "description": "Сервис кэширования или загрузки мероприятия временно недоступен",
+        "content": {"application/json": {"example": {"detail": "Event loading is unavailable"}}},
+    },
+}
+
 
 @router.get("")
 async def list_events() -> list[EventRead]:
@@ -47,7 +58,13 @@ async def list_events() -> list[EventRead]:
     ...
 
 
-@router.get("/{event_id}")
+@router.get(
+    "/{event_id}",
+    summary="Получение мероприятия",
+    description="Возвращает описание мероприятия. Все денежные суммы указаны в копейках.",
+    response_description="Описание мероприятия",
+    responses=GET_EVENT_RESPONSES,
+)
 async def get_event(event_id: int, event_service: EventReadServiceDeps) -> EventRead:
     """Возвращает описание мероприятия."""
     try:
