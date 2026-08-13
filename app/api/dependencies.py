@@ -6,6 +6,7 @@ from redis.asyncio import Redis
 from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
+from app.infrastructure.cache.event_cache import EventCache
 from app.infrastructure.database.db import DatabaseManager, get_database_manager
 from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
@@ -60,9 +61,11 @@ CheckoutServiceDeps = Annotated[CheckoutService, Depends(get_checkout_service)]
 def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadService:
     return EventReadService(
         database,
-        redis,
-        settings.booking.event_cache_ttl_seconds,
-        settings.booking.event_lock_ttl_seconds,
+        EventCache(
+            redis,
+            settings.booking.event_cache_ttl_seconds,
+            settings.booking.event_lock_ttl_seconds,
+        ),
         settings.booking.event_database_timeout_seconds,
         settings.booking.event_lock_wait_seconds,
     )

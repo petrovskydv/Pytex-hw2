@@ -1,12 +1,8 @@
 import asyncio
-from contextlib import suppress
-
-from pydantic import ValidationError
-from redis.asyncio import Redis
-from redis.exceptions import LockNotOwnedError, RedisError
 
 from app.domain.dto import EventDetailsDTO
-from app.domain.exceptions import EventCacheUnavailableError, EventLoadTimeoutError, EventNotFoundError
+from app.domain.exceptions import EventLoadTimeoutError, EventNotFoundError
+from app.infrastructure.cache.event_cache import EventCache
 from app.infrastructure.database.db import DatabaseManager
 
 EVENT_CACHE_POLL_SECONDS = 0.05
@@ -18,30 +14,17 @@ class EventReadService:
     def __init__(
         self,
         database: DatabaseManager,
-        redis: Redis,
-        cache_ttl_seconds: int,
-        lock_ttl_seconds: int,
+        event_cache: EventCache,
         database_timeout_seconds: float,
         lock_wait_seconds: float,
     ) -> None:
         self._database = database
-        self._redis = redis
-        self._cache_ttl_seconds = cache_ttl_seconds
-        self._lock_ttl_seconds = lock_ttl_seconds
+        self._event_cache = event_cache
         self._database_timeout_seconds = database_timeout_seconds
         self._lock_wait_seconds = lock_wait_seconds
 
-    @staticmethod
-    def _cache_key(event_id: int) -> str:
-        return f"events:{event_id}"
-
-    @staticmethod
-    def _lock_key(event_id: int) -> str:
-        return f"locks:events:{event_id}"
-
     async def _get_cached_event(self, event_id: int) -> EventDetailsDTO | None:
-        cached_event = await self._redis.get(self._cache_key(event_id))
-        return EventDetailsDTO.model_validate_json(cached_event) if cached_event else None
+        return await self._event_cache.get(event_id)
 
     async def _load_and_cache_event(self, event_id: int) -> EventDetailsDTO:
         if cached_event := await self._get_cached_event(event_id):
@@ -54,11 +37,7 @@ class EventReadService:
             raise EventLoadTimeoutError from error
         if event is None:
             raise EventNotFoundError
-        await self._redis.set(
-            self._cache_key(event_id),
-            event.model_dump_json(),
-            ex=self._cache_ttl_seconds,
-        )
+        await self._event_cache.set(event)
         return event
 
     async def _wait_for_cached_event(self, event_id: int) -> EventDetailsDTO:
@@ -70,18 +49,11 @@ class EventReadService:
         raise EventLoadTimeoutError
 
     async def get_event(self, event_id: int) -> EventDetailsDTO:
-        try:
-            if cached_event := await self._get_cached_event(event_id):
-                return cached_event
+        if cached_event := await self._get_cached_event(event_id):
+            return cached_event
 
-            lock = self._redis.lock(self._lock_key(event_id), timeout=self._lock_ttl_seconds)
-            if await lock.acquire(blocking=False):
-                try:
-                    return await self._load_and_cache_event(event_id)
-                finally:
-                    with suppress(LockNotOwnedError, RedisError):
-                        await lock.release()
+        async with self._event_cache.acquire_lock(event_id) as is_leader:
+            if is_leader:
+                return await self._load_and_cache_event(event_id)
 
-            return await self._wait_for_cached_event(event_id)
-        except (RedisError, ValidationError) as error:
-            raise EventCacheUnavailableError from error
+        return await self._wait_for_cached_event(event_id)

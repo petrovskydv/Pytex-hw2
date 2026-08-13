@@ -3,9 +3,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from redis.exceptions import RedisError
 
 from app.domain.dto import EventDetailsDTO
 from app.domain.exceptions import EventCacheUnavailableError, EventLoadTimeoutError, EventNotFoundError
+from app.infrastructure.cache.event_cache import EventCache
 from app.services.event_read import EventReadService
 
 
@@ -41,6 +43,11 @@ class FakeRedis:
         return FakeLock(self, name)
 
 
+class RedisErrorFakeRedis(FakeRedis):
+    async def get(self, key: str) -> str | None:
+        raise RedisError
+
+
 @pytest.fixture
 def event() -> EventDetailsDTO:
     return EventDetailsDTO(
@@ -62,7 +69,7 @@ def make_service(
     lock_wait_seconds: float = 1,
 ) -> EventReadService:
     database = SimpleNamespace(events=SimpleNamespace(get_by_id=get_by_id))
-    return EventReadService(database, redis, 300, 15, 5, lock_wait_seconds)
+    return EventReadService(database, EventCache(redis, 300, 15), 5, lock_wait_seconds)
 
 
 async def test_get_event_returns_cached_value_without_database_request(event: EventDetailsDTO) -> None:
@@ -186,3 +193,8 @@ async def test_invalid_cached_event_raises_cache_unavailable() -> None:
 
     with pytest.raises(EventCacheUnavailableError):
         await make_service(redis, AsyncMock()).get_event(1)
+
+
+async def test_redis_error_raises_cache_unavailable() -> None:
+    with pytest.raises(EventCacheUnavailableError):
+        await make_service(RedisErrorFakeRedis(), AsyncMock()).get_event(1)
