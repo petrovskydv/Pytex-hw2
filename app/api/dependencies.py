@@ -1,12 +1,14 @@
 from typing import Annotated
 
 from fastapi import Depends, Header, Request
+from redis.asyncio import Redis
 
 from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.db import DatabaseManager, get_database_manager
 from app.services.dashboard import DashboardService
+from app.services.event_read import EventReadService
 from app.services.events import EventService
 
 
@@ -32,6 +34,13 @@ PaymentDeps = Annotated[PaymentClient, Depends(get_payment_client)]
 ProtectionDeps = Annotated[ProtectionClient, Depends(get_protection_client)]
 
 
+def get_redis(request: Request) -> Redis:
+    return request.app.state.redis
+
+
+RedisDeps = Annotated[Redis, Depends(get_redis)]
+
+
 def get_event_service(
     database: Database,
     payment_client: PaymentDeps,
@@ -46,6 +55,20 @@ def get_event_service(
 
 
 EventServiceDeps = Annotated[EventService, Depends(get_event_service)]
+
+
+def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadService:
+    return EventReadService(
+        database,
+        redis,
+        settings.event_cache_ttl_seconds,
+        settings.event_lock_ttl_seconds,
+        settings.event_database_timeout_seconds,
+        settings.event_lock_wait_seconds,
+    )
+
+
+EventReadServiceDeps = Annotated[EventReadService, Depends(get_event_read_service)]
 
 
 def get_dashboard_service(database: Database) -> DashboardService:

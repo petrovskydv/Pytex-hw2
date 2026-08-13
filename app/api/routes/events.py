@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import CurrentUserId, EventServiceDeps
+from app.api.dependencies import CurrentUserId, EventReadServiceDeps, EventServiceDeps
 from app.api.schemas import (
     BookingCreate,
     CheckoutBooking,
@@ -8,7 +8,13 @@ from app.api.schemas import (
     EventRead,
     EventSeatRead,
 )
-from app.domain.exceptions import NotFoundError, PaymentCalculationError, SeatsUnavailableError
+from app.domain.exceptions import (
+    EventCacheUnavailableError,
+    EventLoadTimeoutError,
+    NotFoundError,
+    PaymentCalculationError,
+    SeatsUnavailableError,
+)
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -42,9 +48,17 @@ async def list_events() -> list[EventRead]:
 
 
 @router.get("/{event_id}")
-async def get_event(event_id: int) -> EventRead:
+async def get_event(event_id: int, event_service: EventReadServiceDeps) -> EventRead:
     """Возвращает описание мероприятия."""
-    ...
+    try:
+        return EventRead.model_validate(await event_service.get_event(event_id))
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
+    except (EventCacheUnavailableError, EventLoadTimeoutError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Event loading is unavailable",
+        ) from None
 
 
 @router.get("/{event_id}/seats")

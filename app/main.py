@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis import asyncio as aioredis
 
 from app.api.routes import bookings, events, locations, organizer
 from app.config import settings
@@ -13,11 +14,21 @@ from app.infrastructure.database.add_event_data import add_event_data_to_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with httpx.AsyncClient() as http_client:
-        app.state.payment_client = PaymentClient(http_client, str(settings.payment_api_url))
-        app.state.protection_client = ProtectionClient(http_client, str(settings.protection_api_url))
-        await add_event_data_to_db()
-        yield
+    redis = aioredis.from_url(
+        str(settings.redis_url),
+        socket_connect_timeout=settings.redis_socket_timeout_seconds,
+        socket_timeout=settings.redis_socket_timeout_seconds,
+    )
+    try:
+        await redis.ping()
+        async with httpx.AsyncClient() as http_client:
+            app.state.payment_client = PaymentClient(http_client, str(settings.payment_api_url))
+            app.state.protection_client = ProtectionClient(http_client, str(settings.protection_api_url))
+            app.state.redis = redis
+            await add_event_data_to_db()
+            yield
+    finally:
+        await redis.aclose()
 
 
 app = FastAPI(title="API Афиши", lifespan=lifespan)

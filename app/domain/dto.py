@@ -31,6 +31,19 @@ class CheckoutEventDTO(BaseModel):
     starts_at: datetime
 
 
+class EventReadDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organizer_id: int
+    location_id: int
+    title: str
+    description: str | None
+    category: str
+    starts_at: datetime
+    base_price: int
+
+
 class PaymentCalculationDTO(BaseModel):
     commission: int
     total: int
