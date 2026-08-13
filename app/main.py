@@ -19,15 +19,16 @@ async def lifespan(app: FastAPI):
         socket_connect_timeout=settings.redis.socket_timeout_seconds,
         socket_timeout=settings.redis.socket_timeout_seconds,
     )
+    http_client = httpx.AsyncClient()
     try:
         await redis.ping()
-        async with httpx.AsyncClient() as http_client:
-            app.state.payment_client = PaymentClient(http_client, str(settings.external_apis.payment_api_url))
-            app.state.protection_client = ProtectionClient(http_client, str(settings.external_apis.protection_api_url))
-            app.state.redis = redis
-            await add_event_data_to_db()
-            yield
+        app.state.payment_client = PaymentClient(http_client, str(settings.external_apis.payment_api_url))
+        app.state.protection_client = ProtectionClient(http_client, str(settings.external_apis.protection_api_url))
+        app.state.redis = redis
+        await add_event_data_to_db()
+        yield
     finally:
+        await http_client.aclose()
         await redis.aclose()
 
 
