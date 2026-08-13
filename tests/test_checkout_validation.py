@@ -12,12 +12,12 @@ from app.domain.dto import PaymentCalculationDTO, ProtectionCalculationDTO
 from app.domain.exceptions import EventNotFoundError, PaymentCalculationError, SeatsNotFoundError
 from app.domain.statuses import BookingStatus, SeatStatus
 from app.infrastructure.database.models import Booking, EventSeat
-from app.services.events import EventService
+from app.services.checkout import CheckoutService
 
 
 async def test_rejects_missing_event(database_manager, payment_client, protection_client) -> None:
     """Checkout отклоняется, если мероприятия нет в пустой базе."""
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
 
     with pytest.raises(EventNotFoundError):
         await service.create_checkout_booking(1, 1, [1])
@@ -31,7 +31,7 @@ async def test_rejects_missing_event_seat(
 ) -> None:
     """Checkout отклоняется, если указанное место не принадлежит мероприятию."""
     event, _, event_seat = event_with_seat
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
 
     with pytest.raises(SeatsNotFoundError):
         await service.create_checkout_booking(event.id, 1, [event_seat.seat_id, event_seat.seat_id + 1])
@@ -75,7 +75,7 @@ async def test_checkout_saves_payment_and_protection_calculation(
 ) -> None:
     """Checkout сохраняет бронь, резерв места и результаты внешних расчетов."""
     event, _, event_seat = event_with_seat
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
 
     checkout = await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])
 
@@ -102,7 +102,7 @@ async def test_simultaneous_checkout_returns_conflict_for_one_request(
 ) -> None:
     """Два одновременных checkout одного места создают одну бронь и один конфликт."""
     event, _, event_seat = event_with_seat
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
 
     results = await asyncio.gather(
         prepare_checkout(event.id, BookingCreate(seat_ids=[event_seat.seat_id]), 1, service),
@@ -153,7 +153,7 @@ async def test_payment_and_protection_start_in_parallel(
     event, _, event_seat = event_with_seat
     payment_client.calculate.side_effect = calculate_payment
     protection_client.calculate.side_effect = calculate_protection
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
     checkout_task = asyncio.create_task(service.create_checkout_booking(event.id, 1, [event_seat.seat_id]))
 
     await asyncio.wait_for(asyncio.gather(payment_started.wait(), protection_started.wait()), timeout=0.1)
@@ -171,7 +171,7 @@ async def test_payment_error_cancels_booking_and_releases_seat(
     """Ошибка платежного сервиса отменяет бронь и освобождает место."""
     event, _, event_seat = event_with_seat
     payment_client.calculate.side_effect = PaymentCalculationError
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
 
     with pytest.raises(PaymentCalculationError):
         await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])
@@ -209,7 +209,7 @@ async def test_payment_error_cancels_protection_calculation(
 
     protection_client.calculate.side_effect = calculate_protection
     event, _, event_seat = event_with_seat
-    service = EventService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client)
 
     with pytest.raises(PaymentCalculationError):
         await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])

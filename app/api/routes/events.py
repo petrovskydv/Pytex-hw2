@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import CurrentUserId, EventReadServiceDeps, EventServiceDeps
+from app.api.dependencies import CheckoutServiceDeps, CurrentUserId, EventReadServiceDeps
 from app.api.schemas import (
     BookingCreate,
     CheckoutBooking,
@@ -81,11 +81,11 @@ async def prepare_checkout(
     event_id: int,
     payload: BookingCreate,
     user_id: CurrentUserId,
-    event_service: EventServiceDeps,
+    checkout_service: CheckoutServiceDeps,
 ) -> CheckoutResponse:
     """Временно бронирует места за клиентом и возвращает расчет checkout."""
     try:
-        checkout = await event_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
+        checkout = await checkout_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
     except NotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
     except SeatsUnavailableError:

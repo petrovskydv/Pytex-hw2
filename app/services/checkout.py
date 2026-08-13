@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from app.infrastructure.api_clients.protection import ProtectionClient
 
 
-class EventService:
+class CheckoutService:
     """Создаёт бронирования и рассчитывает условия их оформления."""
 
     def __init__(
