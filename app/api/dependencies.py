@@ -63,11 +63,11 @@ def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadSer
         database,
         EventCache(
             redis,
-            settings.booking.event_cache_ttl_seconds,
-            settings.booking.event_lock_ttl_seconds,
+            settings.event_read.cache_ttl_seconds,
+            settings.event_read.lock_ttl_seconds,
         ),
-        settings.booking.event_database_timeout_seconds,
-        settings.booking.event_lock_wait_seconds,
+        settings.event_read.database_timeout_seconds,
+        settings.event_read.lock_wait_seconds,
     )
 
 
