@@ -146,6 +146,35 @@ async def test_follower_times_out_when_leader_does_not_fill_cache() -> None:
         await service.get_event(1)
 
 
+async def test_follower_loads_event_after_leader_error(event: EventDetailsDTO) -> None:
+    redis = FakeRedis()
+    database_started = asyncio.Event()
+    release_database = asyncio.Event()
+    attempts = 0
+
+    async def get_by_id(event_id: int) -> EventDetailsDTO:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            database_started.set()
+            await release_database.wait()
+            raise RuntimeError
+        return event
+
+    database_method = AsyncMock(side_effect=get_by_id)
+    service = make_service(redis, database_method, lock_wait_seconds=0.05)
+    leader = asyncio.create_task(service.get_event(1))
+    await database_started.wait()
+    follower = asyncio.create_task(service.get_event(1))
+    await asyncio.sleep(0)
+    release_database.set()
+
+    with pytest.raises(RuntimeError):
+        await leader
+    assert await follower == event
+    assert database_method.await_count == 2
+
+
 async def test_different_events_use_independent_locks(event: EventDetailsDTO) -> None:
     redis = FakeRedis()
     database_started = asyncio.Event()

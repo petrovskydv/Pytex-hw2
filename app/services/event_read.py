@@ -51,13 +51,25 @@ class EventReadService:
                 return cached_event
         raise EventLoadTimeoutError
 
+    async def _try_load_event_with_lock(self, event_id: int) -> EventDetailsDTO | None:
+        """Загружает мероприятие, если удалось стать лидером заполнения кэша."""
+        async with self._event_cache.acquire_lock(event_id) as is_leader:
+            if is_leader:
+                return await self._load_and_cache_event(event_id)
+        return None
+
     async def get_event(self, event_id: int) -> EventDetailsDTO:
         """Возвращает мероприятие, предотвращая одновременную загрузку из БД."""
         if cached_event := await self._get_cached_event(event_id):
             return cached_event
 
-        async with self._event_cache.acquire_lock(event_id) as is_leader:
-            if is_leader:
-                return await self._load_and_cache_event(event_id)
+        if event := await self._try_load_event_with_lock(event_id):
+            return event
 
-        return await self._wait_for_cached_event(event_id)
+        try:
+            return await self._wait_for_cached_event(event_id)
+        except EventLoadTimeoutError:
+            # Лидер мог завершиться с ошибкой и освободить блокировку без записи в кэш.
+            if event := await self._try_load_event_with_lock(event_id):
+                return event
+            raise
