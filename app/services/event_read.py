@@ -9,7 +9,7 @@ EVENT_CACHE_POLL_SECONDS = 0.05
 
 
 class EventReadService:
-    """Получает мероприятие из кэша с распределённой защитой от cache miss."""
+    """Сервис чтения информации о мероприятиях."""
 
     def __init__(
         self,
@@ -24,9 +24,11 @@ class EventReadService:
         self._lock_wait_seconds = lock_wait_seconds
 
     async def _get_cached_event(self, event_id: int) -> EventDetailsDTO | None:
+        """Возвращает мероприятие из кэша."""
         return await self._event_cache.get(event_id)
 
     async def _load_and_cache_event(self, event_id: int) -> EventDetailsDTO:
+        """Загружает мероприятие из БД и сохраняет его в кэше."""
         if cached_event := await self._get_cached_event(event_id):
             return cached_event
 
@@ -41,6 +43,7 @@ class EventReadService:
         return event
 
     async def _wait_for_cached_event(self, event_id: int) -> EventDetailsDTO:
+        """Ожидает заполнения кэша лидером загрузки."""
         for _ in range(int(self._lock_wait_seconds / EVENT_CACHE_POLL_SECONDS)):
             await asyncio.sleep(EVENT_CACHE_POLL_SECONDS)
             cached_event = await self._get_cached_event(event_id)
@@ -49,6 +52,7 @@ class EventReadService:
         raise EventLoadTimeoutError
 
     async def get_event(self, event_id: int) -> EventDetailsDTO:
+        """Возвращает мероприятие, предотвращая одновременную загрузку из БД."""
         if cached_event := await self._get_cached_event(event_id):
             return cached_event
 

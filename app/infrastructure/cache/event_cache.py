@@ -18,6 +18,7 @@ class EventCache:
         self._lock_ttl_seconds = lock_ttl_seconds
 
     async def get(self, event_id: int) -> EventDetailsDTO | None:
+        """Возвращает мероприятие из кэша."""
         try:
             cached_event = await self._redis.get(self._cache_key(event_id))
             return EventDetailsDTO.model_validate_json(cached_event) if cached_event else None
@@ -25,6 +26,7 @@ class EventCache:
             raise EventCacheUnavailableError from error
 
     async def set(self, event: EventDetailsDTO) -> None:
+        """Сохраняет мероприятие в кэше с заданным TTL."""
         try:
             await self._redis.set(
                 self._cache_key(event.id),
@@ -36,6 +38,7 @@ class EventCache:
 
     @asynccontextmanager
     async def acquire_lock(self, event_id: int) -> AsyncIterator[bool]:
+        """Пытается неблокирующе захватить Redis-блокировку мероприятия."""
         try:
             lock = self._redis.lock(self._lock_key(event_id), timeout=self._lock_ttl_seconds)
             acquired = await lock.acquire(blocking=False)
@@ -50,8 +53,10 @@ class EventCache:
 
     @staticmethod
     def _cache_key(event_id: int) -> str:
+        """Формирует ключ кэша мероприятия."""
         return f"events:{event_id}"
 
     @staticmethod
     def _lock_key(event_id: int) -> str:
+        """Формирует ключ распределённой блокировки мероприятия."""
         return f"locks:events:{event_id}"
