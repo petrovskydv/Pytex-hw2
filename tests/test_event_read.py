@@ -30,6 +30,7 @@ class FakeLock:
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.ttls: dict[str, int] = {}
         self.locks: set[str] = set()
         self.failed_lock_acquires = 0
 
@@ -38,6 +39,7 @@ class FakeRedis:
 
     async def set(self, key: str, value: str, *, ex: int) -> None:
         self.values[key] = value
+        self.ttls[key] = ex
 
     def lock(self, name: str, *, timeout: int) -> FakeLock:
         return FakeLock(self, name)
@@ -102,6 +104,15 @@ async def test_get_event_caches_database_value(event: EventDetailsDTO) -> None:
     assert result == event
     assert EventDetailsDTO.model_validate_json(redis.values["events:1"]) == event
     get_by_id.assert_awaited_once_with(1)
+
+
+async def test_set_adds_jitter_to_cache_ttl(event: EventDetailsDTO, monkeypatch: pytest.MonkeyPatch) -> None:
+    redis = FakeRedis()
+    monkeypatch.setattr("app.infrastructure.cache.event_cache.random.randint", lambda _min, _max: 30)
+
+    await EventCache(redis, 300, 15).set(event)
+
+    assert redis.ttls["events:1"] == 330
 
 
 async def test_concurrent_cache_miss_loads_event_once(event: EventDetailsDTO) -> None:

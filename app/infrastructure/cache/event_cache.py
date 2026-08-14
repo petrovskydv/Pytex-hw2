@@ -1,3 +1,4 @@
+import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
@@ -26,12 +27,13 @@ class EventCache:
             raise EventCacheUnavailableError from error
 
     async def set(self, event: EventDetailsDTO) -> None:
-        """Сохраняет мероприятие в кэше с заданным TTL."""
+        """Сохраняет мероприятие в кэше с TTL и случайным разбросом."""
         try:
+            ttl_jitter = random.randint(-(self._ttl_seconds // 10), self._ttl_seconds // 10)
             await self._redis.set(
                 self._cache_key(event.id),
                 event.model_dump_json(),
-                ex=self._ttl_seconds,
+                ex=max(1, self._ttl_seconds + ttl_jitter),
             )
         except RedisError as error:
             raise EventCacheUnavailableError from error
