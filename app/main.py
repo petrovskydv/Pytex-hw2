@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 
 import httpx
@@ -12,7 +11,7 @@ from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.add_event_data import add_event_data_to_db
 from app.infrastructure.database.db import session_factory
-from app.services.event_views import EVENT_VIEW_QUEUE_MAX_SIZE, EventViewService, EventViewWorker
+from app.services.event_views import EventViewQueue
 
 
 @asynccontextmanager
@@ -23,8 +22,7 @@ async def lifespan(app: FastAPI):
         socket_timeout=settings.redis.socket_timeout_seconds,
     )
     http_client = httpx.AsyncClient()
-    event_view_worker_task: asyncio.Task[None] | None = None
-    event_view_queue: asyncio.Queue[int | None] | None = None
+    event_view_queue: EventViewQueue | None = None
     try:
         app.state.payment_client = PaymentClient(http_client, settings.external_apis.payment_api_url)
         app.state.protection_client = ProtectionClient(http_client, settings.external_apis.protection_api_url)
@@ -34,15 +32,14 @@ async def lifespan(app: FastAPI):
 
         await redis.ping()
         app.state.redis = redis
-        event_view_queue = asyncio.Queue(maxsize=EVENT_VIEW_QUEUE_MAX_SIZE)
-        app.state.event_view_service = EventViewService(redis, event_view_queue)
-        event_view_worker_task = asyncio.create_task(EventViewWorker(event_view_queue, session_factory).run())
+        event_view_queue = EventViewQueue(redis, session_factory)
+        event_view_queue.start()
+        app.state.event_view_queue = event_view_queue
         yield
     finally:
         try:
-            if event_view_worker_task and event_view_queue:
-                await event_view_queue.put(None)
-                await event_view_worker_task
+            if event_view_queue:
+                await event_view_queue.stop()
         finally:
             await http_client.aclose()
             await redis.aclose()

@@ -1,5 +1,4 @@
 import asyncio
-from collections import Counter
 
 import pytest
 from redis.exceptions import RedisError
@@ -7,13 +6,12 @@ from sqlalchemy import select
 
 from app.infrastructure.database.models import EventView
 from app.services import event_views
-from app.services.event_views import EventViewService, EventViewWorker
+from app.services.event_views import EventViewQueue
 
 
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
-        self.deleted: list[str] = []
 
     async def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool | None:
         if nx and key in self.values:
@@ -21,107 +19,92 @@ class FakeRedis:
         self.values[key] = value
         return True
 
-    async def delete(self, key: str) -> None:
-        self.deleted.append(key)
-        self.values.pop(key, None)
 
-
-async def test_track_enqueues_only_unique_event_views() -> None:
+async def test_add_event_view_enqueues_only_unique() -> None:
     redis = FakeRedis()
-    queue: asyncio.Queue[int | None] = asyncio.Queue()
-    service = EventViewService(redis, queue)
+    queue = EventViewQueue(redis, None)  # type: ignore[arg-type]
 
-    await service.track(1, "127.0.0.1")
-    await service.track(1, "127.0.0.1")
-    await service.track(1, "127.0.0.2")
-    await service.track(2, "127.0.0.1")
+    await queue.add_event_view(1, "127.0.0.1")
+    await queue.add_event_view(1, "127.0.0.1")
+    await queue.add_event_view(1, "127.0.0.2")
+    await queue.add_event_view(2, "127.0.0.1")
 
-    assert [queue.get_nowait() for _ in range(queue.qsize())] == [1, 1, 2]
+    items = [queue._queue.get_nowait() for _ in range(queue._queue.qsize())]
+    assert items == [1, 1, 2]
     assert set(redis.values) == {"views:1:127.0.0.1", "views:1:127.0.0.2", "views:2:127.0.0.1"}
 
 
-async def test_track_ignores_redis_error() -> None:
+async def test_add_event_view_ignores_redis_error() -> None:
     class BrokenRedis(FakeRedis):
         async def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool | None:
             raise RedisError
 
-    queue: asyncio.Queue[int | None] = asyncio.Queue()
+    queue = EventViewQueue(BrokenRedis(), None)  # type: ignore[arg-type]
 
-    await EventViewService(BrokenRedis(), queue).track(1, "127.0.0.1")
+    await queue.add_event_view(1, "127.0.0.1")
 
-    assert queue.empty()
-
-
-async def test_track_cancels_deduplication_when_queue_is_full() -> None:
-    redis = FakeRedis()
-    queue: asyncio.Queue[int | None] = asyncio.Queue(maxsize=1)
-    await queue.put(2)
-
-    await EventViewService(redis, queue).track(1, "127.0.0.1")
-
-    assert "views:1:127.0.0.1" not in redis.values
-    assert redis.deleted == ["views:1:127.0.0.1"]
+    assert queue._queue.empty()
 
 
-async def test_worker_flushes_after_ten_events(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue: asyncio.Queue[int | None] = asyncio.Queue()
-    worker = EventViewWorker(queue, None)  # type: ignore[arg-type]
+async def test_flushes_after_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
     flushed: list[dict[int, int]] = []
 
-    async def flush(counts: Counter[int]) -> bool:
-        if counts:
-            flushed.append(dict(counts))
-            counts.clear()
-        return True
+    class DummyQueue(EventViewQueue):
+        async def _flush_events(self, events: list[int]) -> None:
+            counts: dict[int, int] = {}
+            for event_id in events:
+                counts[event_id] = counts.get(event_id, 0) + 1
+            flushed.append(counts)
 
-    monkeypatch.setattr(worker, "_flush", flush)
+    redis = FakeRedis()
+    queue = DummyQueue(redis, None)  # type: ignore[arg-type]
+    queue.start()
+
     for _ in range(10):
-        await queue.put(1)
-    await queue.put(None)
+        await queue._queue.put(1)
 
-    await worker.run()
+    await asyncio.sleep(0.05)
+    await queue.stop()
 
     assert flushed == [{1: 10}]
 
 
-async def test_worker_flushes_after_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_flushes_after_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(event_views, "EVENT_VIEW_FLUSH_SECONDS", 0.01)
-    queue: asyncio.Queue[int | None] = asyncio.Queue()
-    worker = EventViewWorker(queue, None)  # type: ignore[arg-type]
+
     flushed = asyncio.Event()
 
-    async def flush(counts: Counter[int]) -> bool:
-        if counts:
-            counts.clear()
+    class DummyQueue(EventViewQueue):
+        async def _flush_events(self, events: list[int]) -> None:
             flushed.set()
-        return True
 
-    monkeypatch.setattr(worker, "_flush", flush)
-    task = asyncio.create_task(worker.run())
-    await queue.put(1)
+    redis = FakeRedis()
+    queue = DummyQueue(redis, None)  # type: ignore[arg-type]
+    queue.start()
 
+    await queue._queue.put(1)
     await asyncio.wait_for(flushed.wait(), timeout=0.1)
-    await queue.put(None)
-    await task
+    await queue.stop()
 
 
-async def test_worker_flushes_remaining_events_on_stop(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue: asyncio.Queue[int | None] = asyncio.Queue()
-    worker = EventViewWorker(queue, None)  # type: ignore[arg-type]
+async def test_flushes_remaining_events_on_stop() -> None:
     flushed: list[dict[int, int]] = []
 
-    async def flush(counts: Counter[int]) -> bool:
-        if counts:
-            flushed.append(dict(counts))
-            counts.clear()
-        return True
+    class DummyQueue(EventViewQueue):
+        async def _flush_events(self, events: list[int]) -> None:
+            counts: dict[int, int] = {}
+            for event_id in events:
+                counts[event_id] = counts.get(event_id, 0) + 1
+            flushed.append(counts)
 
-    monkeypatch.setattr(worker, "_flush", flush)
-    await queue.put(1)
-    await queue.put(2)
-    await queue.put(None)
+    redis = FakeRedis()
+    queue = DummyQueue(redis, None)  # type: ignore[arg-type]
+    queue.start()
 
-    await worker.run()
+    await queue._queue.put(1)
+    await queue._queue.put(2)
+    await asyncio.sleep(0.02)
+    await queue.stop()
 
     assert flushed == [{1: 1, 2: 1}]
 

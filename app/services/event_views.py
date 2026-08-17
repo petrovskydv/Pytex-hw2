@@ -1,9 +1,9 @@
 import asyncio
 import logging
-from collections import Counter
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.infrastructure.database.db import DatabaseManager
@@ -13,87 +13,76 @@ logger = logging.getLogger(__name__)
 EVENT_VIEW_TTL_SECONDS = 5 * 60
 EVENT_VIEW_BATCH_SIZE = 10
 EVENT_VIEW_FLUSH_SECONDS = 5
-EVENT_VIEW_QUEUE_MAX_SIZE = 1_000
 
 
-class EventViewService:
-    """Дедуплицирует просмотры и передаёт уникальные события воркеру."""
+class EventViewQueue:
+    """Управляет очередью просмотров событий с lifecycle методами."""
 
-    def __init__(self, redis: Redis, queue: asyncio.Queue[int | None]) -> None:
+    def __init__(self, redis: Redis, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._redis = redis
-        self._queue = queue
-
-    async def track(self, event_id: int, ip: str) -> None:
-        """Ставит уникальный просмотр в очередь, не влияя на HTTP-ответ."""
-        key = f"views:{event_id}:{ip}"
-        try:
-            if not await self._redis.set(key, "1", nx=True, ex=EVENT_VIEW_TTL_SECONDS):
-                return
-        except RedisError:
-            logger.exception("Не удалось дедуплицировать просмотр мероприятия")
-            return
-
-        try:
-            self._queue.put_nowait(event_id)
-        except asyncio.QueueFull:
-            logger.exception("Очередь просмотров мероприятий заполнена")
-            try:
-                await self._redis.delete(key)
-            except RedisError:
-                logger.exception("Не удалось отменить дедупликацию просмотра мероприятия")
-
-
-class EventViewWorker:
-    """Агрегирует просмотры из очереди и периодически записывает их в БД."""
-
-    def __init__(
-        self,
-        queue: asyncio.Queue[int | None],
-        session_factory: async_sessionmaker[AsyncSession],
-    ) -> None:
-        self._queue = queue
         self._session_factory = session_factory
+        self._queue: asyncio.Queue[int | None] = asyncio.Queue()
+        self._worker_task: asyncio.Task[None] | None = None
 
-    async def run(self) -> None:
-        """Обрабатывает очередь до получения сигнала остановки."""
-        counts: Counter[int] = Counter()
-        loop = asyncio.get_running_loop()
-        flush_at: float | None = None
+    def start(self) -> None:
+        """Запускает фонового воркера."""
+        if self._worker_task is None:
+            self._worker_task = asyncio.create_task(self._run_worker())
 
+    async def stop(self) -> None:
+        """Останавливает воркера, флушит оставшиеся события."""
+        if self._worker_task:
+            await self._queue.put(None)
+            await self._worker_task
+            self._worker_task = None
+
+    async def add_event_view(self, event_id: int, ip: str) -> None:
+        """Добавляет уникальный просмотр в очередь."""
+        try:
+            key = f"views:{event_id}:{ip}"
+            if await self._redis.set(key, "1", nx=True, ex=EVENT_VIEW_TTL_SECONDS):
+                self._queue.put_nowait(event_id)
+        except RedisError:
+            logger.exception("Redis error in add_event_view")
+
+    async def _run_worker(self) -> None:
+        """Фоновый воркер для батчинга событий."""
+        events: list[int] = []
         while True:
-            timeout = EVENT_VIEW_FLUSH_SECONDS if flush_at is None else max(0, flush_at - loop.time())
             try:
-                event_id = await asyncio.wait_for(self._queue.get(), timeout)
+                event_id = await asyncio.wait_for(self._queue.get(), timeout=EVENT_VIEW_FLUSH_SECONDS)
+
+                if event_id is None:
+                    # Graceful shutdown
+                    if events:
+                        await self._flush_events(events)
+                    return
+
+                events.append(event_id)
+                if len(events) >= EVENT_VIEW_BATCH_SIZE:
+                    await self._flush_events(events)
+                    events = []
+
             except TimeoutError:
-                await self._flush(counts)
-                flush_at = loop.time() + EVENT_VIEW_FLUSH_SECONDS if counts else None
-                continue
+                if events:
+                    await self._flush_events(events)
+                    events = []
 
-            self._queue.task_done()
-            if event_id is None:
-                while not await self._flush(counts):
-                    await asyncio.sleep(EVENT_VIEW_FLUSH_SECONDS)
-                return
-
-            counts[event_id] += 1
-            if sum(counts.values()) >= EVENT_VIEW_BATCH_SIZE:
-                await self._flush(counts)
-                flush_at = loop.time() + EVENT_VIEW_FLUSH_SECONDS if counts else None
-            elif flush_at is None:
-                flush_at = loop.time() + EVENT_VIEW_FLUSH_SECONDS
-
-    async def _flush(self, counts: Counter[int]) -> None:
-        """Сбрасывает накопленные счётчики, сохраняя их при ошибке БД."""
-        if not counts:
+    async def _flush_events(self, events: list[int]) -> None:
+        """Агрегирует и сохраняет события в БД."""
+        if not events:
             return
 
+        # Агрегация событий
+        counts: dict[int, int] = {}
+        for event_id in events:
+            counts[event_id] = counts.get(event_id, 0) + 1
+
+        # Сохранение в БД
         try:
             async with self._session_factory() as session:
                 database = DatabaseManager(session, self._session_factory)
                 await database.event_views.increment_many(counts)
                 await database.commit()
-        except Exception:
-            logger.exception("Не удалось сохранить просмотры мероприятий")
-            return
-
-        counts.clear()
+        except SQLAlchemyError:
+            logger.exception("Failed to save event views")

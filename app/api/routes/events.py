@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.api.dependencies import CheckoutServiceDeps, CurrentUserId, EventReadServiceDeps, EventViewServiceDeps
+from app.api.dependencies import CheckoutServiceDeps, CurrentUserId, EventReadServiceDeps, EventViewQueueDeps
 from app.api.schemas import (
     BookingCreate,
     CheckoutBooking,
@@ -69,7 +69,7 @@ async def get_event(
     event_id: int,
     request: Request,
     event_service: EventReadServiceDeps,
-    event_view_service: EventViewServiceDeps,
+    event_view_queue: EventViewQueueDeps,
 ) -> EventRead:
     """Возвращает описание мероприятия."""
     try:
@@ -81,7 +81,7 @@ async def get_event(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Event loading is unavailable",
         ) from None
-    await event_view_service.track(event_id, request.client.host)
+    await event_view_queue.add_event_view(event_id, request.client.host)
     return event
 
 
