@@ -3,9 +3,9 @@ import logging
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.domain.exceptions import EventViewSaveError
 from app.infrastructure.database.db import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -84,5 +84,5 @@ class EventViewQueue:
                 database = DatabaseManager(session, self._session_factory)
                 await database.event_views.increment_many(counts)
                 await database.commit()
-        except SQLAlchemyError:
+        except EventViewSaveError:
             logger.exception("Failed to save event views")

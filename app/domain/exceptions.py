@@ -30,3 +30,7 @@ class EventLoadTimeoutError(Exception):
 
 class EventCacheUnavailableError(Exception):
     """Redis недоступен или содержит некорректные данные мероприятия."""
+
+
+class EventViewSaveError(Exception):
+    """Не удалось сохранить просмотры мероприятий в базу данных."""
