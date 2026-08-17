@@ -26,11 +26,14 @@ async def lifespan(app: FastAPI):
     event_view_worker_task: asyncio.Task[None] | None = None
     event_view_queue: asyncio.Queue[int | None] | None = None
     try:
-        await redis.ping()
-        app.state.payment_client = PaymentClient(http_client, str(settings.external_apis.payment_api_url))
-        app.state.protection_client = ProtectionClient(http_client, str(settings.external_apis.protection_api_url))
-        app.state.redis = redis
+        app.state.payment_client = PaymentClient(http_client, settings.external_apis.payment_api_url)
+        app.state.protection_client = ProtectionClient(http_client, settings.external_apis.protection_api_url)
+
+        # заполнение бд тестовыми данными
         await add_event_data_to_db()
+
+        await redis.ping()
+        app.state.redis = redis
         event_view_queue = asyncio.Queue(maxsize=EVENT_VIEW_QUEUE_MAX_SIZE)
         app.state.event_view_service = EventViewService(redis, event_view_queue)
         event_view_worker_task = asyncio.create_task(EventViewWorker(event_view_queue, session_factory).run())
