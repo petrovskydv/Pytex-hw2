@@ -52,6 +52,16 @@ class EventReadSettings(BaseModel):
     """Максимальное ожидание заполнения кэша лидером в секундах."""
 
 
+class EventViewSettings(BaseModel):
+    """Настройки батчинга просмотров мероприятий."""
+
+    batch_size: PositiveInt = 10
+    """Количество событий для сброса в базу данных."""
+
+    flush_seconds: PositiveFloat = 5
+    """Максимальное время ожидания перед сбросом батча в секундах."""
+
+
 class Settings(BaseSettings):
     """Конфигурация приложения."""
 
@@ -71,6 +81,9 @@ class Settings(BaseSettings):
 
     event_read: EventReadSettings = EventReadSettings()
     """Настройки чтения мероприятий."""
+
+    event_view: EventViewSettings = EventViewSettings()
+    """Настройки батчинга просмотров."""
 
     @model_validator(mode="after")
     def validate_event_lock_timeout(self) -> "Settings":

@@ -11,16 +11,22 @@ from app.infrastructure.database.db import DatabaseManager
 logger = logging.getLogger(__name__)
 
 EVENT_VIEW_TTL_SECONDS = 5 * 60
-EVENT_VIEW_BATCH_SIZE = 10
-EVENT_VIEW_FLUSH_SECONDS = 5
 
 
 class EventViewQueue:
     """Управляет очередью просмотров событий с lifecycle методами."""
 
-    def __init__(self, redis: Redis, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        redis: Redis,
+        session_factory: async_sessionmaker[AsyncSession],
+        batch_size: int = 10,
+        flush_seconds: float = 5,
+    ) -> None:
         self._redis = redis
         self._session_factory = session_factory
+        self._batch_size = batch_size
+        self._flush_seconds = flush_seconds
         self._queue: asyncio.Queue[int | None] = asyncio.Queue()
         self._worker_task: asyncio.Task[None] | None = None
 
@@ -50,7 +56,7 @@ class EventViewQueue:
         events: list[int] = []
         while True:
             try:
-                event_id = await asyncio.wait_for(self._queue.get(), timeout=EVENT_VIEW_FLUSH_SECONDS)
+                event_id = await asyncio.wait_for(self._queue.get(), timeout=self._flush_seconds)
 
                 if event_id is None:
                     # Graceful shutdown
@@ -59,7 +65,7 @@ class EventViewQueue:
                     return
 
                 events.append(event_id)
-                if len(events) >= EVENT_VIEW_BATCH_SIZE:
+                if len(events) >= self._batch_size:
                     await self._flush_events(events)
                     events = []
 

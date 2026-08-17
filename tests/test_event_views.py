@@ -5,7 +5,6 @@ from redis.exceptions import RedisError
 from sqlalchemy import select
 
 from app.infrastructure.database.models import EventView
-from app.services import event_views
 from app.services.event_views import EventViewQueue
 
 
@@ -69,9 +68,7 @@ async def test_flushes_after_batch_size(monkeypatch: pytest.MonkeyPatch) -> None
     assert flushed == [{1: 10}]
 
 
-async def test_flushes_after_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(event_views, "EVENT_VIEW_FLUSH_SECONDS", 0.01)
-
+async def test_flushes_after_timeout() -> None:
     flushed = asyncio.Event()
 
     class DummyQueue(EventViewQueue):
@@ -79,7 +76,7 @@ async def test_flushes_after_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
             flushed.set()
 
     redis = FakeRedis()
-    queue = DummyQueue(redis, None)  # type: ignore[arg-type]
+    queue = DummyQueue(redis, None, flush_seconds=0.01)  # type: ignore[arg-type]
     queue.start()
 
     await queue._queue.put(1)

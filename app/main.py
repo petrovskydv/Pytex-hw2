@@ -32,7 +32,12 @@ async def lifespan(app: FastAPI):
 
         await redis.ping()
         app.state.redis = redis
-        event_view_queue = EventViewQueue(redis, session_factory)
+        event_view_queue = EventViewQueue(
+            redis,
+            session_factory,
+            batch_size=settings.event_view.batch_size,
+            flush_seconds=settings.event_view.flush_seconds,
+        )
         event_view_queue.start()
         app.state.event_view_queue = event_view_queue
         yield
