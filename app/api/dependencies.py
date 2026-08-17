@@ -11,6 +11,7 @@ from app.infrastructure.database.db import DatabaseManager, get_database_manager
 from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
 from app.services.event_read import EventReadService
+from app.services.event_views import EventViewService
 
 
 def get_current_user_id(x_user_id: Annotated[int, Header()]) -> int:
@@ -72,6 +73,13 @@ def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadSer
 
 
 EventReadServiceDeps = Annotated[EventReadService, Depends(get_event_read_service)]
+
+
+def get_event_view_service(request: Request) -> EventViewService:
+    return request.app.state.event_view_service
+
+
+EventViewServiceDeps = Annotated[EventViewService, Depends(get_event_view_service)]
 
 
 def get_dashboard_service(database: Database) -> DashboardService:

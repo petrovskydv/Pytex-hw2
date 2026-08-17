@@ -30,7 +30,7 @@ def postgres_url() -> str:
         subprocess.run(
             [sys.executable, "-m", "alembic", "upgrade", "head"],
             check=True,
-            env={**os.environ, "DATABASE_URL": url},
+            env={**os.environ, "DATABASE_URL": url, "DATABASE__URL": url},
         )
         yield url
     finally:

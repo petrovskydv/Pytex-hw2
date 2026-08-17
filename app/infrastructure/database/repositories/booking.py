@@ -1,17 +1,14 @@
 from datetime import datetime
 
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.dto import BookingDTO, SalesDashboardDTO
 from app.domain.statuses import BookingStatus, SeatStatus
 from app.infrastructure.database.models import Booking, EventSeat
+from app.infrastructure.database.repositories.base import BaseRepository
 
 
-class BookingRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
+class BookingRepository(BaseRepository):
     async def create(self, event_id: int, user_id: int, amount: int, reserved_until: datetime) -> BookingDTO:
         booking = Booking(
             event_id=event_id,

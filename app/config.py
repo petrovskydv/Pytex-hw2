@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     booking: BookingSettings
     """Настройки бронирования."""
 
-    event_read: EventReadSettings
+    event_read: EventReadSettings = EventReadSettings()
     """Настройки чтения мероприятий."""
 
     @model_validator(mode="after")

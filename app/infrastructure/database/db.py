@@ -7,6 +7,7 @@ from app.config import settings
 from app.infrastructure.database.repositories.booking import BookingRepository
 from app.infrastructure.database.repositories.event import EventRepository
 from app.infrastructure.database.repositories.event_seat import EventSeatRepository
+from app.infrastructure.database.repositories.event_view import EventViewRepository
 
 engine = create_async_engine(str(settings.database.url), pool_pre_ping=True)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -49,6 +50,10 @@ class DatabaseManager:
     @property
     def event_seats(self) -> EventSeatRepository:
         return EventSeatRepository(self._session)
+
+    @property
+    def event_views(self) -> EventViewRepository:
+        return EventViewRepository(self._session)
 
 
 async def get_database_manager() -> AsyncIterator[DatabaseManager]:

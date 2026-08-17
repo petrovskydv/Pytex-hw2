@@ -1,17 +1,14 @@
 from datetime import datetime
 
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.dto import EventSeatDTO, OccupancyDashboardDTO
 from app.domain.statuses import SeatStatus
 from app.infrastructure.database.models import EventSeat
+from app.infrastructure.database.repositories.base import BaseRepository
 
 
-class EventSeatRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
+class EventSeatRepository(BaseRepository):
     async def get_available_for_update(self, event_id: int, seat_ids: list[int]) -> list[EventSeatDTO]:
         statement = (
             select(EventSeat)
