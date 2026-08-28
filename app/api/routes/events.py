@@ -46,7 +46,7 @@ GET_EVENT_RESPONSES = {
         "content": {"application/json": {"example": {"detail": "Event not found"}}},
     },
     status.HTTP_503_SERVICE_UNAVAILABLE: {
-        "description": "Сервис кэширования или загрузки мероприятия временно недоступен",
+        "description": "Сервис временно недоступен",
         "content": {"application/json": {"example": {"detail": "Event loading is unavailable"}}},
     },
 }
