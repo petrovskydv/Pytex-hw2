@@ -54,9 +54,14 @@ class EventViewQueue:
     async def _run_worker(self) -> None:
         """Фоновый воркер для батчинга событий."""
         events: list[int] = []
+        flush_at = 0.0
         while True:
             try:
-                event_id = await asyncio.wait_for(self._queue.get(), timeout=self._flush_seconds)
+                timeout = None
+                if events:
+                    timeout = max(0, flush_at - asyncio.get_running_loop().time())
+
+                event_id = await asyncio.wait_for(self._queue.get(), timeout=timeout)
 
                 if event_id is None:
                     # Graceful shutdown
@@ -65,6 +70,8 @@ class EventViewQueue:
                     return
 
                 events.append(event_id)
+                if len(events) == 1:
+                    flush_at = asyncio.get_running_loop().time() + self._flush_seconds
                 if len(events) >= self._batch_size:
                     await self._flush_events(events)
                     events = []

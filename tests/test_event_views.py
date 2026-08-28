@@ -84,6 +84,24 @@ async def test_flushes_after_timeout() -> None:
     await queue.stop()
 
 
+async def test_flush_timeout_starts_with_first_event() -> None:
+    flushed = asyncio.Event()
+
+    class DummyQueue(EventViewQueue):
+        async def _flush_events(self, events: list[int]) -> None:
+            flushed.set()
+
+    queue = DummyQueue(FakeRedis(), None, flush_seconds=0.1)  # type: ignore[arg-type]
+    queue.start()
+    started_at = asyncio.get_running_loop().time()
+    await queue._queue.put(1)
+    await asyncio.sleep(0.06)
+    await queue._queue.put(2)
+    await asyncio.wait_for(flushed.wait(), timeout=0.06)
+    assert asyncio.get_running_loop().time() - started_at < 0.14
+    await queue.stop()
+
+
 async def test_flushes_remaining_events_on_stop() -> None:
     flushed: list[dict[int, int]] = []
 
