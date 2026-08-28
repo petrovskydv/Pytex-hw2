@@ -4,6 +4,7 @@ from app.domain.dto import EventDetailsDTO
 from app.domain.exceptions import EventLoadTimeoutError, EventNotFoundError
 from app.infrastructure.cache.event_cache import EventCache
 from app.infrastructure.database.db import DatabaseManager
+from app.services.event_views import EventViewQueue
 
 EVENT_CACHE_POLL_SECONDS = 0.05
 
@@ -15,11 +16,13 @@ class EventReadService:
         self,
         database: DatabaseManager,
         event_cache: EventCache,
+        event_view_queue: EventViewQueue,
         database_timeout_seconds: float,
         lock_wait_seconds: float,
     ) -> None:
         self._database = database
         self._event_cache = event_cache
+        self._event_view_queue = event_view_queue
         self._database_timeout_seconds = database_timeout_seconds
         self._lock_wait_seconds = lock_wait_seconds
 
@@ -58,7 +61,7 @@ class EventReadService:
                 return await self._load_and_cache_event(event_id)
         return None
 
-    async def get_event(self, event_id: int) -> EventDetailsDTO:
+    async def _get_event(self, event_id: int) -> EventDetailsDTO:
         """Возвращает мероприятие, предотвращая одновременную загрузку из БД."""
         if cached_event := await self._get_cached_event(event_id):
             return cached_event
@@ -67,9 +70,17 @@ class EventReadService:
             return event
 
         try:
-            return await self._wait_for_cached_event(event_id)
+            event = await self._wait_for_cached_event(event_id)
         except EventLoadTimeoutError:
             # Лидер мог завершиться с ошибкой и освободить блокировку без записи в кэш.
             if event := await self._try_load_event_with_lock(event_id):
                 return event
             raise
+
+        return event
+
+    async def get_event(self, event_id: int, ip: str) -> EventDetailsDTO:
+        """Возвращает мероприятие и добавляет просмотр в очередь."""
+        event = await self._get_event(event_id)
+        await self._event_view_queue.add_event_view(event_id, ip)
+        return event

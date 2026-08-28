@@ -81,7 +81,7 @@ def make_service(
     lock_wait_seconds: float = 1,
 ) -> EventReadService:
     database = SimpleNamespace(events=SimpleNamespace(get_by_id=get_by_id))
-    return EventReadService(database, EventCache(redis, 300, 15), 5, lock_wait_seconds)
+    return EventReadService(database, EventCache(redis, 300, 15), AsyncMock(), 5, lock_wait_seconds)
 
 
 async def test_get_event_returns_cached_value_without_database_request(event: EventDetailsDTO) -> None:
@@ -89,7 +89,7 @@ async def test_get_event_returns_cached_value_without_database_request(event: Ev
     redis.values["events:1"] = event.model_dump_json()
     get_by_id = AsyncMock()
 
-    result = await make_service(redis, get_by_id).get_event(1)
+    result = await make_service(redis, get_by_id).get_event(1, "127.0.0.1")
 
     assert result == event
     get_by_id.assert_not_awaited()
@@ -99,11 +99,21 @@ async def test_get_event_caches_database_value(event: EventDetailsDTO) -> None:
     redis = FakeRedis()
     get_by_id = AsyncMock(return_value=event)
 
-    result = await make_service(redis, get_by_id).get_event(1)
+    result = await make_service(redis, get_by_id).get_event(1, "127.0.0.1")
 
     assert result == event
     assert EventDetailsDTO.model_validate_json(redis.values["events:1"]) == event
     get_by_id.assert_awaited_once_with(1)
+
+
+async def test_get_event_adds_view_after_successful_load(event: EventDetailsDTO) -> None:
+    event_view_queue = AsyncMock()
+    database = SimpleNamespace(events=SimpleNamespace(get_by_id=AsyncMock(return_value=event)))
+    service = EventReadService(database, EventCache(FakeRedis(), 300, 15), event_view_queue, 5, 1)
+
+    await service.get_event(event.id, "127.0.0.1")
+
+    event_view_queue.add_event_view.assert_awaited_once_with(event.id, "127.0.0.1")
 
 
 async def test_set_adds_jitter_to_cache_ttl(event: EventDetailsDTO, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,9 +137,9 @@ async def test_concurrent_cache_miss_loads_event_once(event: EventDetailsDTO) ->
 
     database_method = AsyncMock(side_effect=get_by_id)
     service = make_service(redis, database_method)
-    leader = asyncio.create_task(service.get_event(1))
+    leader = asyncio.create_task(service.get_event(1, "127.0.0.1"))
     await database_started.wait()
-    followers = [asyncio.create_task(service.get_event(1)) for _ in range(3)]
+    followers = [asyncio.create_task(service.get_event(1, "127.0.0.1")) for _ in range(3)]
     await asyncio.sleep(0)
     release_database.set()
 
@@ -143,7 +153,7 @@ async def test_event_not_found_releases_lock() -> None:
     service = make_service(redis, AsyncMock(return_value=None))
 
     with pytest.raises(EventNotFoundError):
-        await service.get_event(1)
+        await service.get_event(1, "127.0.0.1")
 
     assert redis.locks == set()
 
@@ -154,7 +164,7 @@ async def test_follower_times_out_when_leader_does_not_fill_cache() -> None:
     service = make_service(redis, AsyncMock(), lock_wait_seconds=0.05)
 
     with pytest.raises(EventLoadTimeoutError):
-        await service.get_event(1)
+        await service.get_event(1, "127.0.0.1")
 
 
 async def test_follower_loads_event_after_leader_error(event: EventDetailsDTO) -> None:
@@ -174,9 +184,9 @@ async def test_follower_loads_event_after_leader_error(event: EventDetailsDTO) -
 
     database_method = AsyncMock(side_effect=get_by_id)
     service = make_service(redis, database_method, lock_wait_seconds=0.05)
-    leader = asyncio.create_task(service.get_event(1))
+    leader = asyncio.create_task(service.get_event(1, "127.0.0.1"))
     await database_started.wait()
-    follower = asyncio.create_task(service.get_event(1))
+    follower = asyncio.create_task(service.get_event(1, "127.0.0.1"))
     await asyncio.sleep(0)
     release_database.set()
 
@@ -198,9 +208,9 @@ async def test_different_events_use_independent_locks(event: EventDetailsDTO) ->
 
     database_method = AsyncMock(side_effect=get_by_id)
     service = make_service(redis, database_method)
-    first = asyncio.create_task(service.get_event(1))
+    first = asyncio.create_task(service.get_event(1, "127.0.0.1"))
     await database_started.wait()
-    second = asyncio.create_task(service.get_event(2))
+    second = asyncio.create_task(service.get_event(2, "127.0.0.1"))
     await asyncio.sleep(0)
 
     assert database_method.await_count == 2
@@ -213,7 +223,7 @@ async def test_database_error_releases_lock() -> None:
     service = make_service(redis, AsyncMock(side_effect=RuntimeError))
 
     with pytest.raises(RuntimeError):
-        await service.get_event(1)
+        await service.get_event(1, "127.0.0.1")
 
     assert redis.locks == set()
 
@@ -227,7 +237,7 @@ async def test_cancelled_database_request_releases_lock() -> None:
         await asyncio.Event().wait()
         return EventDetailsDTO.model_construct()
 
-    task = asyncio.create_task(make_service(redis, AsyncMock(side_effect=get_by_id)).get_event(1))
+    task = asyncio.create_task(make_service(redis, AsyncMock(side_effect=get_by_id)).get_event(1, "127.0.0.1"))
     await database_started.wait()
     task.cancel()
 
@@ -242,14 +252,14 @@ async def test_invalid_cached_event_raises_cache_unavailable() -> None:
     redis.values["events:1"] = "invalid"
 
     with pytest.raises(EventCacheUnavailableError):
-        await make_service(redis, AsyncMock()).get_event(1)
+        await make_service(redis, AsyncMock()).get_event(1, "127.0.0.1")
 
 
 async def test_redis_error_raises_cache_unavailable() -> None:
     with pytest.raises(EventCacheUnavailableError):
-        await make_service(RedisErrorFakeRedis(), AsyncMock()).get_event(1)
+        await make_service(RedisErrorFakeRedis(), AsyncMock()).get_event(1, "127.0.0.1")
 
 
 async def test_lock_release_error_raises_cache_unavailable(event: EventDetailsDTO) -> None:
     with pytest.raises(EventCacheUnavailableError):
-        await make_service(ReleaseErrorFakeRedis(), AsyncMock(return_value=event)).get_event(1)
+        await make_service(ReleaseErrorFakeRedis(), AsyncMock(return_value=event)).get_event(1, "127.0.0.1")

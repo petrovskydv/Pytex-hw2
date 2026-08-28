@@ -59,7 +59,18 @@ def get_checkout_service(
 CheckoutServiceDeps = Annotated[CheckoutService, Depends(get_checkout_service)]
 
 
-def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadService:
+def get_event_view_queue(request: Request) -> EventViewQueue:
+    return request.app.state.event_view_queue
+
+
+EventViewQueueDeps = Annotated[EventViewQueue, Depends(get_event_view_queue)]
+
+
+def get_event_read_service(
+    database: Database,
+    redis: RedisDeps,
+    event_view_queue: EventViewQueueDeps,
+) -> EventReadService:
     return EventReadService(
         database,
         EventCache(
@@ -67,19 +78,13 @@ def get_event_read_service(database: Database, redis: RedisDeps) -> EventReadSer
             settings.event_read.cache_ttl_seconds,
             settings.event_read.lock_ttl_seconds,
         ),
+        event_view_queue,
         settings.event_read.database_timeout_seconds,
         settings.event_read.lock_wait_seconds,
     )
 
 
 EventReadServiceDeps = Annotated[EventReadService, Depends(get_event_read_service)]
-
-
-def get_event_view_queue(request: Request) -> EventViewQueue:
-    return request.app.state.event_view_queue
-
-
-EventViewQueueDeps = Annotated[EventViewQueue, Depends(get_event_view_queue)]
 
 
 def get_dashboard_service(database: Database) -> DashboardService:
