@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
-from app.api.dependencies import CurrentUserId, EventServiceDeps
+from app.api.dependencies import CheckoutServiceDeps, CurrentUserId, EventReadServiceDeps
 from app.api.schemas import (
     BookingCreate,
     CheckoutBooking,
@@ -8,7 +8,13 @@ from app.api.schemas import (
     EventRead,
     EventSeatRead,
 )
-from app.domain.exceptions import NotFoundError, PaymentCalculationError, SeatsUnavailableError
+from app.domain.exceptions import (
+    EventCacheUnavailableError,
+    EventLoadTimeoutError,
+    NotFoundError,
+    PaymentCalculationError,
+    SeatsUnavailableError,
+)
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -34,6 +40,17 @@ PREPARE_CHECKOUT_RESPONSES = {
     },
 }
 
+GET_EVENT_RESPONSES = {
+    status.HTTP_404_NOT_FOUND: {
+        "description": "Мероприятие с указанным идентификатором не найдено",
+        "content": {"application/json": {"example": {"detail": "Event not found"}}},
+    },
+    status.HTTP_503_SERVICE_UNAVAILABLE: {
+        "description": "Сервис временно недоступен",
+        "content": {"application/json": {"example": {"detail": "Event loading is unavailable"}}},
+    },
+}
+
 
 @router.get("")
 async def list_events() -> list[EventRead]:
@@ -41,10 +58,29 @@ async def list_events() -> list[EventRead]:
     ...
 
 
-@router.get("/{event_id}")
-async def get_event(event_id: int) -> EventRead:
+@router.get(
+    "/{event_id}",
+    summary="Получение мероприятия",
+    description="Возвращает описание мероприятия. Все денежные суммы указаны в копейках.",
+    response_description="Описание мероприятия",
+    responses=GET_EVENT_RESPONSES,
+)
+async def get_event(
+    event_id: int,
+    request: Request,
+    event_service: EventReadServiceDeps,
+) -> EventRead:
     """Возвращает описание мероприятия."""
-    ...
+    try:
+        event = EventRead.model_validate(await event_service.get_event(event_id, request.client.host))
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
+    except (EventCacheUnavailableError, EventLoadTimeoutError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Event loading is unavailable",
+        ) from None
+    return event
 
 
 @router.get("/{event_id}/seats")
@@ -67,11 +103,11 @@ async def prepare_checkout(
     event_id: int,
     payload: BookingCreate,
     user_id: CurrentUserId,
-    event_service: EventServiceDeps,
+    checkout_service: CheckoutServiceDeps,
 ) -> CheckoutResponse:
     """Временно бронирует места за клиентом и возвращает расчет checkout."""
     try:
-        checkout = await event_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
+        checkout = await checkout_service.create_checkout_booking(event_id, user_id, payload.seat_ids)
     except NotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
     except SeatsUnavailableError:

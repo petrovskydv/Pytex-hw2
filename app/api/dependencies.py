@@ -1,13 +1,17 @@
 from typing import Annotated
 
 from fastapi import Depends, Header, Request
+from redis.asyncio import Redis
 
 from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
+from app.infrastructure.cache.event_cache import EventCache
 from app.infrastructure.database.db import DatabaseManager, get_database_manager
+from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
-from app.services.events import EventService
+from app.services.event_read import EventReadService
+from app.services.event_views import EventViewQueue
 
 
 def get_current_user_id(x_user_id: Annotated[int, Header()]) -> int:
@@ -32,20 +36,55 @@ PaymentDeps = Annotated[PaymentClient, Depends(get_payment_client)]
 ProtectionDeps = Annotated[ProtectionClient, Depends(get_protection_client)]
 
 
-def get_event_service(
+def get_redis(request: Request) -> Redis:
+    return request.app.state.redis
+
+
+RedisDeps = Annotated[Redis, Depends(get_redis)]
+
+
+def get_checkout_service(
     database: Database,
     payment_client: PaymentDeps,
     protection_client: ProtectionDeps,
-) -> EventService:
-    return EventService(
+) -> CheckoutService:
+    return CheckoutService(
         database,
-        settings.booking_ttl_minutes,
+        settings.booking.booking_ttl_minutes,
         payment_client,
         protection_client,
     )
 
 
-EventServiceDeps = Annotated[EventService, Depends(get_event_service)]
+CheckoutServiceDeps = Annotated[CheckoutService, Depends(get_checkout_service)]
+
+
+def get_event_view_queue(request: Request) -> EventViewQueue:
+    return request.app.state.event_view_queue
+
+
+EventViewQueueDeps = Annotated[EventViewQueue, Depends(get_event_view_queue)]
+
+
+def get_event_read_service(
+    database: Database,
+    redis: RedisDeps,
+    event_view_queue: EventViewQueueDeps,
+) -> EventReadService:
+    return EventReadService(
+        database,
+        EventCache(
+            redis,
+            settings.event_read.cache_ttl_seconds,
+            settings.event_read.lock_ttl_seconds,
+        ),
+        event_view_queue,
+        settings.event_read.database_timeout_seconds,
+        settings.event_read.lock_wait_seconds,
+    )
+
+
+EventReadServiceDeps = Annotated[EventReadService, Depends(get_event_read_service)]
 
 
 def get_dashboard_service(database: Database) -> DashboardService:

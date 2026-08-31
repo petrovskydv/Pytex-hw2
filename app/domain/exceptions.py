@@ -22,3 +22,15 @@ class SeatsNotFoundError(NotFoundError):
 
 class PaymentCalculationError(Exception):
     """Не удалось рассчитать стоимость оплаты."""
+
+
+class EventLoadTimeoutError(Exception):
+    """Не удалось дождаться загрузки мероприятия другим процессом."""
+
+
+class EventCacheUnavailableError(Exception):
+    """Redis недоступен или содержит некорректные данные мероприятия."""
+
+
+class EventViewSaveError(Exception):
+    """Не удалось сохранить просмотры мероприятий в базу данных."""

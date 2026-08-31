@@ -1,6 +1,7 @@
 import asyncio
 
 import httpx
+from pydantic import HttpUrl
 
 RATE_LIMIT_REQUESTS = 5
 RATE_LIMIT_INTERVAL_SECONDS = 1
@@ -10,12 +11,12 @@ class BaseApiClient:
     def __init__(
         self,
         http_client: httpx.AsyncClient,
-        base_url: str,
+        base_url: HttpUrl | str,
         rate_limit_requests: int = RATE_LIMIT_REQUESTS,
         rate_limit_interval: float = RATE_LIMIT_INTERVAL_SECONDS,
     ) -> None:
         self._http_client = http_client
-        self._base_url = base_url.rstrip("/")
+        self._base_url = str(base_url).rstrip("/")
         self._rate_limiter = asyncio.Semaphore(rate_limit_requests)
         self._rate_limit_interval = rate_limit_interval
 
