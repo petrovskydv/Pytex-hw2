@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import CurrentUserId, DashboardServiceDeps
+from app.api.dependencies import CurrentUserId, DashboardReportDispatcherDeps, DashboardServiceDeps
 from app.api.schemas import EventCreate, EventDashboard, EventRead
 from app.domain.exceptions import EventNotFoundError
 
@@ -64,6 +64,7 @@ async def get_event_dashboard(
     event_id: int,
     organizer_id: CurrentUserId,
     dashboard_service: DashboardServiceDeps,
+    report_dispatcher: DashboardReportDispatcherDeps,
 ) -> EventDashboard:
     """Возвращает аналитические данные для дашборда по мероприятию."""
     try:
@@ -71,9 +72,11 @@ async def get_event_dashboard(
     except EventNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
 
-    return EventDashboard(
+    response = EventDashboard(
         event_title=dashboard.event.title,
         starts_at=dashboard.event.starts_at,
         sales=dashboard.sales.model_dump(),
         occupancy=dashboard.occupancy.model_dump(),
     )
+    await report_dispatcher.enqueue(event_id, response)
+    return response

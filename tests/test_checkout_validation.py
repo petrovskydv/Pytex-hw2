@@ -15,9 +15,14 @@ from app.infrastructure.database.models import Booking, EventSeat
 from app.services.checkout import CheckoutService
 
 
-async def test_rejects_missing_event(database_manager, payment_client, protection_client) -> None:
+async def test_rejects_missing_event(
+    database_manager,
+    payment_client,
+    protection_client,
+    protection_retry_dispatcher,
+) -> None:
     """Checkout отклоняется, если мероприятия нет в пустой базе."""
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
 
     with pytest.raises(EventNotFoundError):
         await service.create_checkout_booking(1, 1, [1])
@@ -28,10 +33,11 @@ async def test_rejects_missing_event_seat(
     event_with_seat,
     payment_client,
     protection_client,
+    protection_retry_dispatcher,
 ) -> None:
     """Checkout отклоняется, если указанное место не принадлежит мероприятию."""
     event, _, event_seat = event_with_seat
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
 
     with pytest.raises(SeatsNotFoundError):
         await service.create_checkout_booking(event.id, 1, [event_seat.seat_id, event_seat.seat_id + 1])
@@ -71,11 +77,12 @@ async def test_checkout_saves_payment_and_protection_calculation(
     event_with_seat,
     payment_client,
     protection_client,
+    protection_retry_dispatcher,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Checkout сохраняет бронь, резерв места и результаты внешних расчетов."""
     event, _, event_seat = event_with_seat
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
 
     checkout = await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])
 
@@ -91,6 +98,25 @@ async def test_checkout_saves_payment_and_protection_calculation(
     assert saved_event_seat.booking_id == booking.id
     assert saved_event_seat.status == SeatStatus.reserved
     assert checkout.payment.total == 5150
+    protection_retry_dispatcher.enqueue.assert_not_awaited()
+
+
+async def test_checkout_enqueues_protection_retry_after_failed_calculation(
+    database_manager,
+    event_with_seat,
+    payment_client,
+    protection_client,
+    protection_retry_dispatcher,
+) -> None:
+    """Checkout без защиты сохраняет платёж и ставит фоновый дорасчёт."""
+    event, _, event_seat = event_with_seat
+    protection_client.calculate.return_value = None
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
+
+    checkout = await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])
+
+    assert checkout.protection is None
+    protection_retry_dispatcher.enqueue.assert_awaited_once_with(checkout.booking.id)
 
 
 async def test_simultaneous_checkout_returns_conflict_for_one_request(
@@ -98,11 +124,12 @@ async def test_simultaneous_checkout_returns_conflict_for_one_request(
     event_with_seat,
     payment_client,
     protection_client,
+    protection_retry_dispatcher,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Два одновременных checkout одного места создают одну бронь и один конфликт."""
     event, _, event_seat = event_with_seat
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
 
     results = await asyncio.gather(
         prepare_checkout(event.id, BookingCreate(seat_ids=[event_seat.seat_id]), 1, service),
@@ -129,6 +156,7 @@ async def test_payment_and_protection_start_in_parallel(
     event_with_seat,
     payment_client,
     protection_client,
+    protection_retry_dispatcher,
 ) -> None:
     """Расчеты платежа и защиты стартуют до завершения любого из них."""
     payment_started = asyncio.Event()
@@ -153,7 +181,7 @@ async def test_payment_and_protection_start_in_parallel(
     event, _, event_seat = event_with_seat
     payment_client.calculate.side_effect = calculate_payment
     protection_client.calculate.side_effect = calculate_protection
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
     checkout_task = asyncio.create_task(service.create_checkout_booking(event.id, 1, [event_seat.seat_id]))
 
     await asyncio.wait_for(asyncio.gather(payment_started.wait(), protection_started.wait()), timeout=0.1)
@@ -166,12 +194,13 @@ async def test_payment_error_cancels_booking_and_releases_seat(
     event_with_seat,
     payment_client,
     protection_client,
+    protection_retry_dispatcher,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Ошибка платежного сервиса отменяет бронь и освобождает место."""
     event, _, event_seat = event_with_seat
     payment_client.calculate.side_effect = PaymentCalculationError
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
 
     with pytest.raises(PaymentCalculationError):
         await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])
@@ -195,6 +224,7 @@ async def test_payment_error_cancels_protection_calculation(
     event_with_seat,
     payment_client,
     protection_client,
+    protection_retry_dispatcher,
 ) -> None:
     """Ошибка платежного сервиса отменяет незавершенный расчет защиты."""
     protection_cancelled = asyncio.Event()
@@ -209,7 +239,7 @@ async def test_payment_error_cancels_protection_calculation(
 
     protection_client.calculate.side_effect = calculate_protection
     event, _, event_seat = event_with_seat
-    service = CheckoutService(database_manager, 15, payment_client, protection_client)
+    service = CheckoutService(database_manager, 15, payment_client, protection_client, protection_retry_dispatcher)
 
     with pytest.raises(PaymentCalculationError):
         await service.create_checkout_booking(event.id, 1, [event_seat.seat_id])

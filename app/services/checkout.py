@@ -9,6 +9,7 @@ from app.infrastructure.database.db import DatabaseManager
 if TYPE_CHECKING:
     from app.infrastructure.api_clients.payment import PaymentClient
     from app.infrastructure.api_clients.protection import ProtectionClient
+    from app.services.task_dispatchers import ProtectionRetryDispatcher
 
 
 class CheckoutService:
@@ -20,11 +21,13 @@ class CheckoutService:
         booking_ttl_minutes: int,
         payment_client: "PaymentClient",
         protection_client: "ProtectionClient",
+        protection_retry_dispatcher: "ProtectionRetryDispatcher",
     ) -> None:
         self._database = database
         self._booking_ttl_minutes = booking_ttl_minutes
         self._payment_client = payment_client
         self._protection_client = protection_client
+        self._protection_retry_dispatcher = protection_retry_dispatcher
 
     async def _get_event(
         self,
@@ -105,6 +108,8 @@ class CheckoutService:
 
         await self._database.bookings.save_checkout_calculation(booking.id, payment.commission, protection_price)
         await self._database.commit()
+        if protection is None:
+            await self._protection_retry_dispatcher.enqueue(booking.id)
 
         return CheckoutDTO(
             booking=booking,

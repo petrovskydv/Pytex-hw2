@@ -24,6 +24,10 @@ class PaymentCalculationError(Exception):
     """Не удалось рассчитать стоимость оплаты."""
 
 
+class ProtectionCalculationError(Exception):
+    """Не удалось получить корректный расчёт страховой защиты."""
+
+
 class EventLoadTimeoutError(Exception):
     """Не удалось дождаться загрузки мероприятия другим процессом."""
 

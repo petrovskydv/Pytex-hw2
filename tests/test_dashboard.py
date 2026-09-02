@@ -21,6 +21,7 @@ async def test_dashboard_aggregates_sales_and_occupancy(
     database_manager,
     event_with_seat,
     session_factory: async_sessionmaker[AsyncSession],
+    dashboard_report_dispatcher,
 ) -> None:
     """Дашборд считает оплаченные брони и места каждого статуса."""
     event, seat, event_seat = event_with_seat
@@ -79,8 +80,14 @@ async def test_dashboard_aggregates_sales_and_occupancy(
     assert dashboard.sales.average_order == 1002
     assert dashboard.occupancy.model_dump() == {"total": 3, "available": 1, "reserved": 1, "sold": 1}
 
-    response = await get_event_dashboard(event.id, event.organizer_id, DashboardService(database_manager))
+    response = await get_event_dashboard(
+        event.id,
+        event.organizer_id,
+        DashboardService(database_manager),
+        dashboard_report_dispatcher,
+    )
     assert response.occupancy.occupancy_percent == pytest.approx(66.66666666666667)
+    dashboard_report_dispatcher.enqueue.assert_awaited_once_with(event.id, response)
 
 
 async def test_dashboard_returns_zero_for_empty_aggregates(
@@ -109,7 +116,11 @@ async def test_dashboard_returns_zero_for_empty_aggregates(
     assert dashboard.occupancy.model_dump() == {"total": 0, "available": 0, "reserved": 0, "sold": 0}
 
 
-async def test_dashboard_returns_not_found_for_missing_or_foreign_event(database_manager, event_with_seat) -> None:
+async def test_dashboard_returns_not_found_for_missing_or_foreign_event(
+    database_manager,
+    event_with_seat,
+    dashboard_report_dispatcher,
+) -> None:
     """Не раскрывает существование чужого мероприятия."""
     event, _, _ = event_with_seat
     service = DashboardService(database_manager)
@@ -119,9 +130,10 @@ async def test_dashboard_returns_not_found_for_missing_or_foreign_event(database
     with pytest.raises(EventNotFoundError):
         await service.get_dashboard(event.id, event.organizer_id + 1)
     with pytest.raises(HTTPException, match="Event not found") as error:
-        await get_event_dashboard(event.id, event.organizer_id + 1, service)
+        await get_event_dashboard(event.id, event.organizer_id + 1, service, dashboard_report_dispatcher)
 
     assert error.value.status_code == 404
+    dashboard_report_dispatcher.enqueue.assert_not_awaited()
 
 
 async def test_dashboard_runs_aggregates_in_parallel_with_different_sessions(

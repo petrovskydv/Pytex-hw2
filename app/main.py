@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis import asyncio as aioredis
 
 from app.api.routes import bookings, events, locations, organizer
+from app.background.brokers import insurance_broker, reports_broker
 from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
@@ -21,7 +22,7 @@ async def lifespan(app: FastAPI):
         socket_connect_timeout=settings.redis.socket_timeout_seconds,
         socket_timeout=settings.redis.socket_timeout_seconds,
     )
-    http_client = httpx.AsyncClient()
+    http_client = httpx.AsyncClient(timeout=httpx.Timeout(connect=3, read=3, write=3, pool=3))
     event_view_queue: EventViewQueue | None = None
     try:
         app.state.payment_client = PaymentClient(http_client, settings.external_apis.payment_api_url)
@@ -31,6 +32,8 @@ async def lifespan(app: FastAPI):
         await add_event_data_to_db()
 
         await redis.ping()
+        await reports_broker.startup()
+        await insurance_broker.startup()
         app.state.redis = redis
         event_view_queue = EventViewQueue(
             redis,
@@ -46,8 +49,12 @@ async def lifespan(app: FastAPI):
             if event_view_queue:
                 await event_view_queue.stop()
         finally:
-            await http_client.aclose()
-            await redis.aclose()
+            try:
+                await reports_broker.shutdown()
+                await insurance_broker.shutdown()
+            finally:
+                await http_client.aclose()
+                await redis.aclose()
 
 
 app = FastAPI(title="API Афиши", lifespan=lifespan)

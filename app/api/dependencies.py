@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import Depends, Header, Request
 from redis.asyncio import Redis
 
+from app.background.dispatchers import TaskiqDashboardReportDispatcher, TaskiqProtectionRetryDispatcher
 from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
@@ -12,6 +13,7 @@ from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
 from app.services.event_read import EventReadService
 from app.services.event_views import EventViewQueue
+from app.services.task_dispatchers import DashboardReportDispatcher, ProtectionRetryDispatcher
 
 
 def get_current_user_id(x_user_id: Annotated[int, Header()]) -> int:
@@ -36,6 +38,26 @@ PaymentDeps = Annotated[PaymentClient, Depends(get_payment_client)]
 ProtectionDeps = Annotated[ProtectionClient, Depends(get_protection_client)]
 
 
+def get_protection_retry_dispatcher() -> ProtectionRetryDispatcher:
+    return TaskiqProtectionRetryDispatcher()
+
+
+ProtectionRetryDispatcherDeps = Annotated[
+    ProtectionRetryDispatcher,
+    Depends(get_protection_retry_dispatcher),
+]
+
+
+def get_dashboard_report_dispatcher() -> DashboardReportDispatcher:
+    return TaskiqDashboardReportDispatcher()
+
+
+DashboardReportDispatcherDeps = Annotated[
+    DashboardReportDispatcher,
+    Depends(get_dashboard_report_dispatcher),
+]
+
+
 def get_redis(request: Request) -> Redis:
     return request.app.state.redis
 
@@ -47,12 +69,14 @@ def get_checkout_service(
     database: Database,
     payment_client: PaymentDeps,
     protection_client: ProtectionDeps,
+    protection_retry_dispatcher: ProtectionRetryDispatcherDeps,
 ) -> CheckoutService:
     return CheckoutService(
         database,
         settings.booking.booking_ttl_minutes,
         payment_client,
         protection_client,
+        protection_retry_dispatcher,
     )
 
 

@@ -20,15 +20,16 @@ from reportlab.platypus import (
 
 from app.api.schemas import EventDashboard
 
-FONT_DIR = Path(__file__).parent / "assets" / "fonts"
+ASSETS_DIR = Path(__file__).parents[1] / "assets"
+FONT_DIR = ASSETS_DIR / "fonts"
 REGULAR_FONT_PATH = FONT_DIR / "FiraCode-Regular.ttf"
 BOLD_FONT_PATH = FONT_DIR / "FiraCode-Bold.ttf"
 HEADING_FONT_PATH = FONT_DIR / "IBMPlexSans-Regular.ttf"
 HEADING_BOLD_FONT_PATH = FONT_DIR / "IBMPlexSans-Bold.ttf"
 PAGE_BACKGROUND_PATHS = {
-    1: Path(__file__).parent / "assets" / "report_background_cover.jpg",
-    2: Path(__file__).parent / "assets" / "report_background_sales.jpg",
-    3: Path(__file__).parent / "assets" / "report_background_occupancy.jpg",
+    1: ASSETS_DIR / "report_background_cover.jpg",
+    2: ASSETS_DIR / "report_background_sales.jpg",
+    3: ASSETS_DIR / "report_background_occupancy.jpg",
 }
 
 
