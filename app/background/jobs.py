@@ -21,7 +21,7 @@ from app.services.pdf_reports import generate_event_dashboard_pdf
 from app.services.protection_retry import ProtectionRetryService
 
 
-def build_dashboard_report(
+def _publish_dashboard_report(
     event_id: int,
     dashboard_data: dict[str, object],
     output_directory: Path | None = None,
@@ -45,7 +45,7 @@ def build_dashboard_report(
 @reports_broker.task(queue_name=REPORTS_QUEUE, ack_type="when_executed")
 def generate_dashboard_report_task(event_id: int, dashboard_data: dict[str, object]) -> str:
     """Формирует локальный PDF по снимку данных, возвращённых dashboard."""
-    return str(build_dashboard_report(event_id, dashboard_data))
+    return str(_publish_dashboard_report(event_id, dashboard_data))
 
 
 @cleanup_broker.task(

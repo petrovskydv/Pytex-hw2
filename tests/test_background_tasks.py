@@ -12,7 +12,7 @@ from app.background.brokers import (
     retry_schedule_source,
 )
 from app.background.jobs import (
-    build_dashboard_report,
+    _publish_dashboard_report,
     cleanup_expired_bookings_task,
     generate_dashboard_report_task,
     retry_protection_task,
@@ -43,14 +43,14 @@ def test_taskiq_routing_schedule_and_retry_contract() -> None:
     assert retry_middleware.schedule_source is retry_schedule_source
 
 
-def test_build_dashboard_report_creates_only_complete_pdf(tmp_path) -> None:
+def test_publish_dashboard_report_creates_only_complete_pdf(tmp_path) -> None:
     dashboard = {
         "event": {"title": "Python Conference", "starts_at": "2030-01-01T12:00:00"},
         "sales": {"paid_orders": 2, "sold_tickets": 3, "revenue": 15000, "average_order": 7500},
         "occupancy": {"total": 10, "available": 6, "reserved": 1, "sold": 3},
     }
 
-    output_path = build_dashboard_report(42, dashboard, tmp_path)
+    output_path = _publish_dashboard_report(42, dashboard, tmp_path)
 
     assert output_path.parent == tmp_path
     assert output_path.name.startswith("dashboard-event-42-")
