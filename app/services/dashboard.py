@@ -1,5 +1,6 @@
 import asyncio
 
+from app.background.dispatchers import DashboardReportDispatcher
 from app.domain.dto import EventDashboardDTO, OccupancyDashboardDTO, SalesDashboardDTO
 from app.domain.exceptions import EventNotFoundError
 from app.infrastructure.database.db import DatabaseManager
@@ -8,8 +9,9 @@ from app.infrastructure.database.db import DatabaseManager
 class DashboardService:
     """Собирает аналитику мероприятия для его организатора."""
 
-    def __init__(self, database: DatabaseManager) -> None:
+    def __init__(self, database: DatabaseManager, report_dispatcher: DashboardReportDispatcher) -> None:
         self._database = database
+        self._report_dispatcher = report_dispatcher
 
     async def _get_sales(self, event_id: int) -> SalesDashboardDTO:
         async with self._database.transaction() as database:
@@ -27,4 +29,6 @@ class DashboardService:
             raise EventNotFoundError
 
         sales, occupancy = await asyncio.gather(self._get_sales(event_id), self._get_occupancy(event_id))
-        return EventDashboardDTO(event=event, sales=sales, occupancy=occupancy)
+        dashboard = EventDashboardDTO(event=event, sales=sales, occupancy=occupancy)
+        await self._report_dispatcher.enqueue(event_id, dashboard)
+        return dashboard

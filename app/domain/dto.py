@@ -13,6 +13,15 @@ class BookingDTO(BaseModel):
     reserved_until: datetime
 
 
+class PendingProtectionDTO(BaseModel):
+    """Данные pending-брони, необходимые для фонового расчёта защиты."""
+
+    booking_id: int
+    amount: int
+    event_category: str
+    event_starts_at: datetime
+
+
 class EventSeatDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

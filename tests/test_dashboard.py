@@ -21,6 +21,7 @@ async def test_dashboard_aggregates_sales_and_occupancy(
     database_manager,
     event_with_seat,
     session_factory: async_sessionmaker[AsyncSession],
+    dashboard_report_dispatcher,
 ) -> None:
     """Дашборд считает оплаченные брони и места каждого статуса."""
     event, seat, event_seat = event_with_seat
@@ -70,7 +71,8 @@ async def test_dashboard_aggregates_sales_and_occupancy(
         )
         await session.commit()
 
-    dashboard = await DashboardService(database_manager).get_dashboard(event.id, event.organizer_id)
+    service = DashboardService(database_manager, dashboard_report_dispatcher)
+    dashboard = await service.get_dashboard(event.id, event.organizer_id)
 
     assert event_seat.status == SeatStatus.available
     assert dashboard.sales.paid_orders == 2
@@ -78,15 +80,23 @@ async def test_dashboard_aggregates_sales_and_occupancy(
     assert dashboard.sales.revenue == 2003
     assert dashboard.sales.average_order == 1002
     assert dashboard.occupancy.model_dump() == {"total": 3, "available": 1, "reserved": 1, "sold": 1}
+    dashboard_report_dispatcher.enqueue.assert_awaited_once_with(event.id, dashboard)
+    dashboard_report_dispatcher.enqueue.reset_mock()
 
-    response = await get_event_dashboard(event.id, event.organizer_id, DashboardService(database_manager))
+    response = await get_event_dashboard(
+        event.id,
+        event.organizer_id,
+        service,
+    )
     assert response.occupancy.occupancy_percent == pytest.approx(66.66666666666667)
+    dashboard_report_dispatcher.enqueue.assert_awaited_once_with(event.id, dashboard)
 
 
 async def test_dashboard_returns_zero_for_empty_aggregates(
     database_manager,
     event_with_seat,
     session_factory: async_sessionmaker[AsyncSession],
+    dashboard_report_dispatcher,
 ) -> None:
     """Дашборд мероприятия без броней и мест возвращает нулевые показатели."""
     event, _, _ = event_with_seat
@@ -103,16 +113,22 @@ async def test_dashboard_returns_zero_for_empty_aggregates(
         session.add(empty_event)
         await session.commit()
 
-    dashboard = await DashboardService(database_manager).get_dashboard(empty_event.id, empty_event.organizer_id)
+    dashboard = await DashboardService(database_manager, dashboard_report_dispatcher).get_dashboard(
+        empty_event.id, empty_event.organizer_id
+    )
 
     assert dashboard.sales.model_dump() == {"paid_orders": 0, "sold_tickets": 0, "revenue": 0, "average_order": 0}
     assert dashboard.occupancy.model_dump() == {"total": 0, "available": 0, "reserved": 0, "sold": 0}
 
 
-async def test_dashboard_returns_not_found_for_missing_or_foreign_event(database_manager, event_with_seat) -> None:
+async def test_dashboard_returns_not_found_for_missing_or_foreign_event(
+    database_manager,
+    event_with_seat,
+    dashboard_report_dispatcher,
+) -> None:
     """Не раскрывает существование чужого мероприятия."""
     event, _, _ = event_with_seat
-    service = DashboardService(database_manager)
+    service = DashboardService(database_manager, dashboard_report_dispatcher)
 
     with pytest.raises(EventNotFoundError):
         await service.get_dashboard(event.id + 1, event.organizer_id)
@@ -122,12 +138,14 @@ async def test_dashboard_returns_not_found_for_missing_or_foreign_event(database
         await get_event_dashboard(event.id, event.organizer_id + 1, service)
 
     assert error.value.status_code == 404
+    dashboard_report_dispatcher.enqueue.assert_not_awaited()
 
 
 async def test_dashboard_runs_aggregates_in_parallel_with_different_sessions(
     database_manager,
     event_with_seat,
     monkeypatch,
+    dashboard_report_dispatcher,
 ) -> None:
     """Агрегаты начинают работу одновременно на отдельных сессиях."""
     sales_started = asyncio.Event()
@@ -150,7 +168,9 @@ async def test_dashboard_runs_aggregates_in_parallel_with_different_sessions(
     monkeypatch.setattr(BookingRepository, "get_sales_dashboard", get_sales)
     monkeypatch.setattr(EventSeatRepository, "get_occupancy_dashboard", get_occupancy)
     event, _, _ = event_with_seat
-    task = asyncio.create_task(DashboardService(database_manager).get_dashboard(event.id, event.organizer_id))
+    task = asyncio.create_task(
+        DashboardService(database_manager, dashboard_report_dispatcher).get_dashboard(event.id, event.organizer_id)
+    )
 
     await asyncio.wait_for(asyncio.gather(sales_started.wait(), occupancy_started.wait()), timeout=0.1)
     release.set()
@@ -163,6 +183,7 @@ async def test_dashboard_releases_ownership_connections_before_parallel_queries(
     postgres_url,
     event_with_seat,
     monkeypatch,
+    dashboard_report_dispatcher,
 ) -> None:
     """Проверка владельца не должна блокировать соединения для параллельных агрегатов."""
     limited_engine = create_async_engine(postgres_url, pool_size=2, max_overflow=0)
@@ -186,8 +207,8 @@ async def test_dashboard_releases_ownership_connections_before_parallel_queries(
     try:
         async with limited_session_factory() as first_session, limited_session_factory() as second_session:
             services = (
-                DashboardService(DatabaseManager(first_session, limited_session_factory)),
-                DashboardService(DatabaseManager(second_session, limited_session_factory)),
+                DashboardService(DatabaseManager(first_session, limited_session_factory), dashboard_report_dispatcher),
+                DashboardService(DatabaseManager(second_session, limited_session_factory), dashboard_report_dispatcher),
             )
             await asyncio.wait_for(
                 asyncio.gather(*(service.get_dashboard(event.id, event.organizer_id) for service in services)),

@@ -35,23 +35,108 @@ services:
       timeout: 3s
       retries: 10
 
-  # app запускаем локально: сначала `uv run alembic upgrade head`
-  # потом `uv run uvicorn app.main:app --reload`
-  # app:
-  #   build: .
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - .:/app
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #     payment-api:
-  #       condition: service_started
-  #     protection-api:
-  #       condition: service_started
-  #     redis:
-  #       condition: service_healthy
+  migrate:
+    build: .
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    environment: &app-environment
+      DATABASE__URL: postgresql+psycopg://postgres:postgres@db:5432/postgres
+      REDIS__URL: redis://redis:6379/0
+      EXTERNAL_APIS__PAYMENT_API_URL: http://payment-api:9001
+      EXTERNAL_APIS__PROTECTION_API_URL: http://protection-api:9002
+      BOOKING__BOOKING_TTL_MINUTES: 15
+      TASKIQ__BROKER_URL: redis://redis:6379/1
+      TASKIQ__REPORTS_DIRECTORY: /app/reports
+      TASKIQ__PROTECTION_RETRY_DELAY_SECONDS: 5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    command: ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app-environment
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./reports:/app/reports
+    depends_on: &runtime-dependencies
+      migrate:
+        condition: service_completed_successfully
+      payment-api:
+        condition: service_started
+      protection-api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  worker-reports:
+    build: .
+    command:
+      - uv
+      - run
+      - --no-sync
+      - taskiq
+      - worker
+      - --workers
+      - "2"
+      - --max-async-tasks
+      - "1"
+      - --max-threadpool-threads
+      - "1"
+      - app.background.brokers:reports_broker
+      - app.background.jobs
+    environment: *app-environment
+    volumes:
+      - ./reports:/app/reports
+    depends_on: *runtime-dependencies
+
+  worker-cleanup:
+    build: .
+    command:
+      - uv
+      - run
+      - --no-sync
+      - taskiq
+      - worker
+      - --workers
+      - "1"
+      - --max-async-tasks
+      - "1"
+      - app.background.brokers:cleanup_broker
+      - app.background.jobs
+    environment: *app-environment
+    depends_on: *runtime-dependencies
+
+  worker-insurance:
+    build: .
+    command:
+      - uv
+      - run
+      - --no-sync
+      - taskiq
+      - worker
+      - --workers
+      - "1"
+      - --max-async-tasks
+      - "10"
+      - app.background.brokers:insurance_broker
+      - app.background.jobs
+    environment: *app-environment
+    depends_on: *runtime-dependencies
+
+  scheduler:
+    build: .
+    command:
+      - uv
+      - run
+      - --no-sync
+      - taskiq
+      - scheduler
+      - --skip-first-run
+      - app.background.brokers:scheduler
+      - app.background.jobs
+    environment: *app-environment
+    depends_on: *runtime-dependencies
 
 volumes:
   postgres_data:

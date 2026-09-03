@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import BaseModel, HttpUrl, PositiveFloat, PositiveInt, PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,6 +64,19 @@ class EventViewSettings(BaseModel):
     """Максимальное время ожидания перед сбросом батча в секундах."""
 
 
+class TaskiqSettings(BaseModel):
+    """Настройки фоновых задач TaskIQ."""
+
+    broker_url: RedisDsn | None = None
+    """Отдельный Redis URL TaskIQ; по умолчанию используется основной Redis."""
+
+    reports_directory: Path = Path("reports")
+    """Каталог для локального сохранения PDF-отчётов."""
+
+    protection_retry_delay_seconds: PositiveFloat = 5
+    """Задержка между двумя фоновыми попытками расчёта защиты."""
+
+
 class Settings(BaseSettings):
     """Конфигурация приложения."""
 
@@ -84,6 +99,9 @@ class Settings(BaseSettings):
 
     event_view: EventViewSettings = EventViewSettings()
     """Настройки батчинга просмотров."""
+
+    taskiq: TaskiqSettings = TaskiqSettings()
+    """Настройки фоновых задач."""
 
     @model_validator(mode="after")
     def validate_event_lock_timeout(self) -> "Settings":
