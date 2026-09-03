@@ -63,7 +63,6 @@ async def cleanup_expired_bookings_task() -> int:
     queue_name=INSURANCE_QUEUE,
     ack_type="when_executed",
     retry_on_error=True,
-    # В TaskIQ 0.12 max_retries=2 даёт исходный запуск и ровно один повтор.
     max_retries=2,
     delay=settings.taskiq.protection_retry_delay_seconds,
 )

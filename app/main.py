@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
         socket_connect_timeout=settings.redis.socket_timeout_seconds,
         socket_timeout=settings.redis.socket_timeout_seconds,
     )
-    http_client = httpx.AsyncClient(timeout=httpx.Timeout(connect=3, read=3, write=3, pool=3))
+    http_client = httpx.AsyncClient()
     event_view_queue: EventViewQueue | None = None
     try:
         app.state.payment_client = PaymentClient(http_client, settings.external_apis.payment_api_url)

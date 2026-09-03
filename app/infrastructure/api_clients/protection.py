@@ -32,7 +32,7 @@ class ProtectionClient(BaseApiClient):
         event_category: str,
         event_starts_at: str,
     ) -> ProtectionCalculationDTO:
-        """Выполняет ровно один запрос; ошибки отдаёт вызывающему коду для retry."""
+        """Выполняет ровно один запрос к сервису страховки."""
         endpoint = "/protection/calculate"
         payload = {
             "booking_id": booking_id,
