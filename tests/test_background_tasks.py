@@ -1,13 +1,17 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from taskiq.middlewares import SmartRetryMiddleware
+from taskiq.state import TaskiqState
 
 from app.background.brokers import (
     CLEANUP_QUEUE,
     INSURANCE_QUEUE,
     REPORTS_QUEUE,
+    close_protection_http_client,
+    create_protection_http_client,
     insurance_broker,
     retry_schedule_source,
 )
@@ -41,6 +45,19 @@ def test_taskiq_routing_schedule_and_retry_contract() -> None:
     )
     assert retry_middleware.default_retry_count == 2
     assert retry_middleware.schedule_source is retry_schedule_source
+
+
+async def test_insurance_worker_reuses_http_client(monkeypatch) -> None:
+    """HTTP-клиент создаётся один раз на worker и закрывается при его остановке."""
+    http_client = AsyncMock()
+    monkeypatch.setattr("app.background.brokers.httpx.AsyncClient", lambda **_: http_client)
+    state = TaskiqState()
+
+    await create_protection_http_client(state)
+    await close_protection_http_client(state)
+
+    assert state.protection_http_client is http_client
+    http_client.aclose.assert_awaited_once()
 
 
 def test_publish_dashboard_report_creates_only_complete_pdf(tmp_path) -> None:

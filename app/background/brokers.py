@@ -1,6 +1,9 @@
+import httpx
 from taskiq import TaskiqScheduler
+from taskiq.events import TaskiqEvents
 from taskiq.middlewares import SmartRetryMiddleware
 from taskiq.schedule_sources import LabelScheduleSource
+from taskiq.state import TaskiqState
 from taskiq_redis import ListRedisScheduleSource, RedisStreamBroker
 
 from app.config import settings
@@ -35,6 +38,21 @@ insurance_broker = _broker(INSURANCE_QUEUE).with_middlewares(
         schedule_source=retry_schedule_source,
     )
 )
+
+
+@insurance_broker.on_event(TaskiqEvents.WORKER_STARTUP)
+async def create_protection_http_client(state: TaskiqState) -> None:
+    """Создаёт общий HTTP-клиент для задач одного insurance worker."""
+    state.protection_http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=3, read=3, write=3, pool=3),
+    )
+
+
+@insurance_broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
+async def close_protection_http_client(state: TaskiqState) -> None:
+    """Закрывает пул HTTP-соединений при остановке insurance worker."""
+    await state.protection_http_client.aclose()
+
 
 scheduler = TaskiqScheduler(
     broker=cleanup_broker,

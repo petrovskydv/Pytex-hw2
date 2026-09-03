@@ -2,8 +2,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-import httpx
-
 from app.background.brokers import (
     CLEANUP_QUEUE,
     INSURANCE_QUEUE,
@@ -12,6 +10,7 @@ from app.background.brokers import (
     insurance_broker,
     reports_broker,
 )
+from app.background.dependencies import ProtectionHttpClient
 from app.config import settings
 from app.domain.dto import EventDashboardDTO
 from app.infrastructure.api_clients.protection import ProtectionClient
@@ -68,10 +67,12 @@ async def cleanup_expired_bookings_task() -> int:
     max_retries=2,
     delay=settings.taskiq.protection_retry_delay_seconds,
 )
-async def retry_protection_task(booking_id: int) -> bool:
+async def retry_protection_task(
+    booking_id: int,
+    http_client: ProtectionHttpClient,
+) -> bool:
     """Одна попытка расчёта; TaskIQ выполняет не более одного retry (всего две)."""
-    timeout = httpx.Timeout(connect=3, read=3, write=3, pool=3)
-    async with session_factory() as session, httpx.AsyncClient(timeout=timeout) as http_client:
+    async with session_factory() as session:
         database = DatabaseManager(session, session_factory)
         client = ProtectionClient(http_client, settings.external_apis.protection_api_url)
         return await ProtectionRetryService(database, client).calculate_for_pending_booking(booking_id)
