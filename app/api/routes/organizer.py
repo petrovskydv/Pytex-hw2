@@ -71,10 +71,9 @@ async def get_event_dashboard(
     except EventNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error.detail) from None
 
-    event_dashboard = EventDashboard(
+    return EventDashboard(
         event_title=dashboard.event.title,
         starts_at=dashboard.event.starts_at,
         sales=dashboard.sales.model_dump(),
         occupancy=dashboard.occupancy.model_dump(),
     )
-    return event_dashboard
