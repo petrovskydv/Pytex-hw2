@@ -103,8 +103,9 @@ def get_event_read_service(
 
 def get_dashboard_service(
     database: Database,
+    report_dispatcher: DashboardReportDispatcherDeps,
 ) -> DashboardService:
-    return DashboardService(database)
+    return DashboardService(database, report_dispatcher)
 
 
 # Алиасы use-case сервисов для маршрутов.

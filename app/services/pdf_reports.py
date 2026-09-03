@@ -18,7 +18,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from app.api.schemas import EventDashboard
+from app.domain.dto import EventDashboardDTO
 
 ASSETS_DIR = Path(__file__).parents[1] / "assets"
 FONT_DIR = ASSETS_DIR / "fonts"
@@ -49,7 +49,7 @@ class OccupancyBar(Flowable):
 
 
 def generate_event_dashboard_pdf(
-    dashboard: EventDashboard,
+    dashboard: EventDashboardDTO,
     output_path: str | Path,
     generated_at: datetime | None = None,
 ) -> Path:
@@ -72,20 +72,21 @@ def generate_event_dashboard_pdf(
         leftMargin=20 * mm,
         topMargin=24 * mm,
         bottomMargin=24 * mm,
-        title=f"Отчет: {dashboard.event_title}",
+        title=f"Отчет: {dashboard.event.title}",
         author="Afisha",
     )
 
     sales = dashboard.sales
     occupancy = dashboard.occupancy
+    occupancy_percent = (occupancy.reserved + occupancy.sold) / occupancy.total * 100 if occupancy.total else 0.0
 
     story = [
         Spacer(1, 80 * mm),
         Paragraph("Отчет по мероприятию", styles["title"]),
         Spacer(1, 8 * mm),
-        Paragraph(dashboard.event_title, styles["subtitle"]),
+        Paragraph(dashboard.event.title, styles["subtitle"]),
         Spacer(1, 5 * mm),
-        Paragraph(f"Дата мероприятия: {_format_datetime(dashboard.starts_at)}", styles["muted"]),
+        Paragraph(f"Дата мероприятия: {_format_datetime(dashboard.event.starts_at)}", styles["muted"]),
         Paragraph(f"Дата генерации отчета: {_format_datetime(generated_at)}", styles["muted"]),
         PageBreak(),
         Paragraph("Отчет по продажам", styles["pageTitle"]),
@@ -104,9 +105,9 @@ def generate_event_dashboard_pdf(
         PageBreak(),
         Paragraph("Отчет по заполняемости", styles["pageTitle"]),
         Spacer(1, 12 * mm),
-        OccupancyBar(occupancy.occupancy_percent),
+        OccupancyBar(occupancy_percent),
         Spacer(1, 4 * mm),
-        Paragraph(f"{occupancy.occupancy_percent:.1f}% мест занято", styles["muted"]),
+        Paragraph(f"{occupancy_percent:.1f}% мест занято", styles["muted"]),
         Spacer(1, 14 * mm),
         _occupancy_table(dashboard, styles),
     ]
@@ -292,7 +293,7 @@ def _summary_cards(
 
 
 def _sales_table(
-    dashboard: EventDashboard,
+    dashboard: EventDashboardDTO,
     styles: dict[str, ParagraphStyle],
 ) -> Table:
     sales = dashboard.sales
@@ -307,7 +308,7 @@ def _sales_table(
 
 
 def _occupancy_table(
-    dashboard: EventDashboard,
+    dashboard: EventDashboardDTO,
     styles: dict[str, ParagraphStyle],
 ) -> Table:
     occupancy = dashboard.occupancy

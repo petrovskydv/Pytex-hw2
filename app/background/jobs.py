@@ -4,7 +4,6 @@ from uuid import uuid4
 
 import httpx
 
-from app.api.schemas import EventDashboard
 from app.background.brokers import (
     CLEANUP_QUEUE,
     INSURANCE_QUEUE,
@@ -14,6 +13,7 @@ from app.background.brokers import (
     reports_broker,
 )
 from app.config import settings
+from app.domain.dto import EventDashboardDTO
 from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.db import DatabaseManager, session_factory
 from app.services.booking_cleanup import BookingCleanupService
@@ -27,7 +27,7 @@ def build_dashboard_report(
     output_directory: Path | None = None,
 ) -> Path:
     """Создаёт PDF во временном файле и атомарно публикует готовый отчёт."""
-    dashboard = EventDashboard.model_validate(dashboard_data)
+    dashboard = EventDashboardDTO.model_validate(dashboard_data)
     generated_at = datetime.now(UTC)
     output_directory = output_directory or settings.taskiq.reports_directory
     output_directory.mkdir(parents=True, exist_ok=True)

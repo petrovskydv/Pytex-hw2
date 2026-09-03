@@ -45,8 +45,7 @@ def test_taskiq_routing_schedule_and_retry_contract() -> None:
 
 def test_build_dashboard_report_creates_only_complete_pdf(tmp_path) -> None:
     dashboard = {
-        "event_title": "Python Conference",
-        "starts_at": "2030-01-01T12:00:00",
+        "event": {"title": "Python Conference", "starts_at": "2030-01-01T12:00:00"},
         "sales": {"paid_orders": 2, "sold_tickets": 3, "revenue": 15000, "average_order": 7500},
         "occupancy": {"total": 10, "available": 6, "reserved": 1, "sold": 3},
     }
