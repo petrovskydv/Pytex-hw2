@@ -42,7 +42,7 @@ API доступен по адресу http://127.0.0.1:8000, Swagger UI - http:
 После запуска инфраструктуры откройте четыре дополнительных терминала:
 
 ```bash
-uv run taskiq worker --workers 1 --max-async-tasks 1 --max-threadpool-threads 1 \
+uv run taskiq worker --workers 2 --max-async-tasks 1 --max-threadpool-threads 1 \
   app.background.brokers:reports_broker app.background.jobs
 uv run taskiq worker --workers 1 --max-async-tasks 1 \
   app.background.brokers:cleanup_broker app.background.jobs

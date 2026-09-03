@@ -78,7 +78,7 @@ services:
       - taskiq
       - worker
       - --workers
-      - "1"
+      - "2"
       - --max-async-tasks
       - "1"
       - --max-threadpool-threads
