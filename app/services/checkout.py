@@ -7,9 +7,9 @@ from app.domain.exceptions import EventNotFoundError, PaymentCalculationError, S
 from app.infrastructure.database.db import DatabaseManager
 
 if TYPE_CHECKING:
+    from app.background.dispatchers import ProtectionRetryDispatcher
     from app.infrastructure.api_clients.payment import PaymentClient
     from app.infrastructure.api_clients.protection import ProtectionClient
-    from app.services.task_dispatchers import ProtectionRetryDispatcher
 
 
 class CheckoutService:

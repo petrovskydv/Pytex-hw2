@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import Depends, Header, Request
 from redis.asyncio import Redis
 
-from app.background.dispatchers import TaskiqDashboardReportDispatcher, TaskiqProtectionRetryDispatcher
+from app.background.dispatchers import DashboardReportDispatcher, ProtectionRetryDispatcher
 from app.config import settings
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
@@ -13,7 +13,6 @@ from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
 from app.services.event_read import EventReadService
 from app.services.event_views import EventViewQueue
-from app.services.task_dispatchers import DashboardReportDispatcher, ProtectionRetryDispatcher
 
 
 def get_current_user_id(x_user_id: Annotated[int, Header()]) -> int:
@@ -39,7 +38,7 @@ ProtectionDeps = Annotated[ProtectionClient, Depends(get_protection_client)]
 
 
 def get_protection_retry_dispatcher() -> ProtectionRetryDispatcher:
-    return TaskiqProtectionRetryDispatcher()
+    return ProtectionRetryDispatcher()
 
 
 ProtectionRetryDispatcherDeps = Annotated[
@@ -49,7 +48,7 @@ ProtectionRetryDispatcherDeps = Annotated[
 
 
 def get_dashboard_report_dispatcher() -> DashboardReportDispatcher:
-    return TaskiqDashboardReportDispatcher()
+    return DashboardReportDispatcher()
 
 
 DashboardReportDispatcherDeps = Annotated[
