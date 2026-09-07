@@ -81,6 +81,8 @@ services:
       KAFKA__MAX_RECORDS: 10
       KAFKA__BATCH_TIMEOUT_MS: 500
       KAFKA__WEBSOCKET_SEND_TIMEOUT_SECONDS: 2
+      PURCHASE_GENERATOR__INTERVAL_SECONDS: 0.05
+      PURCHASE_GENERATOR__EVENT_ID_MAX: 5
     depends_on:
       db:
         condition: service_healthy
