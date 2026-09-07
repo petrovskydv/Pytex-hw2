@@ -19,10 +19,7 @@ def aggregate_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentA
         aggregate["tickets_count"] += purchase.tickets_count
         aggregate["total_amount"] += purchase.total_amount
 
-    return [
-        PaymentActivityAggregate(event_id=event_id, **aggregate)
-        for event_id, aggregate in counters.items()
-    ]
+    return [PaymentActivityAggregate(event_id=event_id, **aggregate) for event_id, aggregate in counters.items()]
 
 
 async def process_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
