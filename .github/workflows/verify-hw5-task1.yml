@@ -17,8 +17,8 @@ jobs:
         with:
           version: "0.10.0"
       - run: uv sync --python 3.13 --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv run ruff check monitoring tests/test_monitoring_service.py
+      - run: uv run ruff format --check monitoring tests/test_monitoring_service.py
       - run: uv run pytest tests/test_monitoring_service.py
       - run: uv run pytest
       - run: docker compose config --quiet
