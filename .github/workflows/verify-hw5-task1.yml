@@ -1,0 +1,41 @@
+name: Verify HW5 task 1
+
+on:
+  push:
+    branches:
+      - hw-5
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hw-5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest tests/test_monitoring_service.py
+      - run: uv run pytest
+      - run: docker compose config --quiet
+      - name: Start monitoring stack
+        run: docker compose up -d --build db kafka migrate monitoring
+      - name: Check monitoring HTTP startup
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8001/openapi.json >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs monitoring kafka db migrate
+          exit 1
+      - name: Show service state
+        run: docker compose ps
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
