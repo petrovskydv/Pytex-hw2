@@ -16,6 +16,8 @@ class KafkaSettings(BaseModel):
     bootstrap_servers: str = "localhost:9092"
     topic: str = "tickets.purchased"
     consumer_group: str = "payment-monitor"
+    max_records: int = 10
+    batch_timeout_ms: int = 500
 
 
 class MonitoringSettings(BaseSettings):

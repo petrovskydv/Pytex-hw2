@@ -1,11 +1,13 @@
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from starlette.routing import WebSocketRoute
 
+from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings
-from monitoring.infrastructure.kafka import MonitoringKafka
+from monitoring.infrastructure.kafka import MonitoringKafka, deserialize_ticket_purchase
 from monitoring.main import create_app
 
 
@@ -37,6 +39,11 @@ class FakeConsumer:
     async def stop(self) -> None:
         self.captured["stopped"] = True
 
+    async def getmany(self, **kwargs: Any) -> dict[Any, list[Any]]:
+        self.captured["getmany_kwargs"] = kwargs
+        await asyncio.Event().wait()
+        return {}
+
 
 class FakeConsumerFactory:
     def __init__(self, captured: dict[str, Any]) -> None:
@@ -46,6 +53,10 @@ class FakeConsumerFactory:
         self.captured["args"] = args
         self.captured["kwargs"] = kwargs
         return FakeConsumer(self.captured)
+
+
+async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> None:
+    """Обработчик-заглушка для unit-тестов Kafka lifecycle."""
 
 
 @pytest.mark.asyncio
@@ -61,7 +72,7 @@ async def test_monitoring_lifespan_owns_resources() -> None:
     app = create_app(
         settings_factory=lambda: settings,
         database_factory=lambda _: database,
-        kafka_factory=lambda _: kafka,
+        kafka_factory=lambda _settings, _handler: kafka,
     )
 
     async with app.router.lifespan_context(app):
@@ -84,7 +95,7 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
     app = create_app(
         settings_factory=lambda: settings,
         database_factory=lambda _: database,
-        kafka_factory=lambda _: kafka,
+        kafka_factory=lambda _settings, _handler: kafka,
     )
 
     with pytest.raises(RuntimeError, match="Kafka unavailable"):
@@ -97,15 +108,23 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
 @pytest.mark.asyncio
 async def test_kafka_connection_disables_auto_commit() -> None:
     captured: dict[str, Any] = {}
-    connection = MonitoringKafka(KafkaSettings(), consumer_factory=FakeConsumerFactory(captured))
+    connection = MonitoringKafka(
+        KafkaSettings(),
+        batch_handler=ignore_purchase_batch,
+        consumer_factory=FakeConsumerFactory(captured),
+    )
 
     await connection.start()
+    await asyncio.sleep(0)
     await connection.stop()
 
     assert captured["args"] == ("tickets.purchased",)
     assert captured["kwargs"]["bootstrap_servers"] == "localhost:9092"
     assert captured["kwargs"]["group_id"] == "payment-monitor"
     assert captured["kwargs"]["enable_auto_commit"] is False
+    assert captured["kwargs"]["value_deserializer"] is deserialize_ticket_purchase
+    assert captured["getmany_kwargs"]["max_records"] == 10
+    assert 0 < captured["getmany_kwargs"]["timeout_ms"] <= 500
     assert captured["started"] is True
     assert captured["stopped"] is True
 
