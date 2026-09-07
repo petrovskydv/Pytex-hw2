@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -8,14 +7,7 @@ from uuid import uuid4
 
 from app.domain.dto import TicketPurchasedEvent
 
-logger = logging.getLogger(__name__)
-
 PurchaseEventSink = Callable[[TicketPurchasedEvent], Awaitable[None]]
-
-
-async def log_generated_purchase(event: TicketPurchasedEvent) -> None:
-    """Логирует сгенерированную покупку до подключения Kafka producer."""
-    logger.debug("Сгенерирована тестовая покупка: %s", event.model_dump(mode="json"))
 
 
 class PurchaseEventGenerator:
