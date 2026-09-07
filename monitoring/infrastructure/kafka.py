@@ -1,34 +1,28 @@
 from collections.abc import Callable
 from typing import Any
 
+from aiokafka import AIOKafkaConsumer
+
 from monitoring.config import KafkaSettings
 
 
 class MonitoringKafka:
-    """Own Kafka consumer connection of the monitoring service."""
+    """Управляет Kafka consumer сервиса мониторинга."""
 
     def __init__(
         self,
         settings: KafkaSettings,
-        consumer_factory: Callable[..., Any] | None = None,
+        consumer_factory: Callable[..., Any] = AIOKafkaConsumer,
     ) -> None:
         self._settings = settings
         self._consumer_factory = consumer_factory
         self._consumer: Any | None = None
 
-    @staticmethod
-    def _default_consumer_factory(*args: Any, **kwargs: Any) -> Any:
-        # The monitoring image has aiokafka as a service-specific dependency.
-        from aiokafka import AIOKafkaConsumer
-
-        return AIOKafkaConsumer(*args, **kwargs)
-
     async def start(self) -> None:
         if self._consumer is not None:
             return
 
-        factory = self._consumer_factory or self._default_consumer_factory
-        consumer = factory(
+        consumer = self._consumer_factory(
             self._settings.topic,
             bootstrap_servers=self._settings.bootstrap_servers,
             group_id=self._settings.consumer_group,
