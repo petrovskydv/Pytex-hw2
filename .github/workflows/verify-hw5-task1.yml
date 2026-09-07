@@ -17,6 +17,7 @@ jobs:
         with:
           version: "0.10.0"
       - run: uv sync --python 3.13 --frozen
+      - run: cp .env.example .env
       - run: uv run ruff check monitoring tests/test_monitoring_service.py
       - run: uv run ruff format --check monitoring tests/test_monitoring_service.py
       - run: uv run pytest tests/test_monitoring_service.py
