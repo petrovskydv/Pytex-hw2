@@ -61,7 +61,23 @@ Scheduler должен запускаться только в одном экз�
 Параметры потока недели 5 вынесены в секцию `KAFKA__*`: topic `tickets.purchased`, `linger_ms=75`, batch до 10
 сообщений с ожиданием не более 500 мс и WebSocket timeout 2 секунды.
 
-Весь стек вместе с миграцией, API, workers, scheduler и Kafka можно запустить одной командой:
+### Сервис мониторинга покупок
+
+Monitoring — отдельное FastAPI-приложение с собственными подключениями к PostgreSQL и Kafka. В задаче 1
+подготовлен его lifecycle и WebSocket-ручка `WS /ws/payments`; обработка событий и рассылка будут добавляться
+в следующих задачах.
+
+Для запуска с хоста:
+
+```bash
+uv run --with-requirements monitoring/requirements.txt \
+  uvicorn monitoring.main:app --host 127.0.0.1 --port 8001
+```
+
+В Docker Compose сервис `monitoring` собирается отдельным `Dockerfile.monitoring`, а Kafka-клиент имеет свой
+минимальный набор зависимостей в `monitoring/requirements.txt`.
+
+Весь стек вместе с миграцией, API, monitoring, workers, scheduler и Kafka можно запустить одной командой:
 
 ```bash
 docker compose up --build
@@ -105,6 +121,7 @@ uv run pre-commit run --all-files
 | Payment API | http://localhost:9001 |
 | Protection API | http://localhost:9002 |
 | FastAPI | http://localhost:8000 |
+| Monitoring FastAPI / WebSocket | http://localhost:8001 / `ws://localhost:8001/ws/payments` |
 
 Остановить инфраструктуру:
 
