@@ -1,1 +1,1 @@
-"""Purchase monitoring service."""
+"""Сервис мониторинга покупок."""
