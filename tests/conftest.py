@@ -48,7 +48,10 @@ def engine(postgres_url: str) -> AsyncEngine:
 async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     async with engine.begin() as connection:
         await connection.execute(
-            text("TRUNCATE event_views, event_seats, bookings, events, seats, locations RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE event_payment_activity, event_views, event_seats, bookings, "
+                "events, seats, locations RESTART IDENTITY CASCADE"
+            )
         )
     return async_sessionmaker(engine, expire_on_commit=False)
 

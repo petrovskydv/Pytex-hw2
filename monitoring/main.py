@@ -9,6 +9,7 @@ from monitoring.api.routes import router
 from monitoring.config import MonitoringSettings, get_settings
 from monitoring.infrastructure.database import MonitoringDatabase
 from monitoring.infrastructure.kafka import MonitoringKafka
+from monitoring.infrastructure.repositories import PaymentActivityRepository
 from monitoring.services.purchase_batches import process_purchase_batch
 
 SettingsFactory = Callable[[], MonitoringSettings]
@@ -25,7 +26,9 @@ async def lifespan(
 ) -> AsyncIterator[None]:
     settings = settings_factory()
     database = database_factory(str(settings.database.url))
-    kafka = kafka_factory(settings.kafka, process_purchase_batch)
+    repository = PaymentActivityRepository(database.session_factory)
+    batch_handler = partial(process_purchase_batch, save_aggregates=repository.save_batch)
+    kafka = kafka_factory(settings.kafka, batch_handler)
 
     try:
         await database.start()

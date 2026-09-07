@@ -23,6 +23,12 @@ class FakeResource:
         self.calls.append(f"{self.name}.stop")
 
 
+class FakeDatabase(FakeResource):
+    def __init__(self, name: str, calls: list[str]) -> None:
+        super().__init__(name, calls)
+        self.session_factory = object()
+
+
 class FailingKafka(FakeResource):
     async def start(self) -> None:
         self.calls.append("kafka.start")
@@ -66,7 +72,7 @@ async def test_monitoring_lifespan_owns_resources() -> None:
         database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
         kafka=KafkaSettings(),
     )
-    database = FakeResource("database", calls)
+    database = FakeDatabase("database", calls)
     kafka = FakeResource("kafka", calls)
 
     app = create_app(
@@ -90,7 +96,7 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
         database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
         kafka=KafkaSettings(),
     )
-    database = FakeResource("database", calls)
+    database = FakeDatabase("database", calls)
     kafka = FailingKafka("kafka", calls)
     app = create_app(
         settings_factory=lambda: settings,

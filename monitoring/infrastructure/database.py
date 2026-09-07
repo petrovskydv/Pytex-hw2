@@ -1,5 +1,5 @@
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 
 class MonitoringDatabase:
@@ -7,6 +7,7 @@ class MonitoringDatabase:
 
     def __init__(self, database_url: str) -> None:
         self.engine: AsyncEngine = create_async_engine(database_url, pool_pre_ping=True)
+        self.session_factory = async_sessionmaker[AsyncSession](self.engine, expire_on_commit=False)
 
     async def start(self) -> None:
         """Проверяет доступность PostgreSQL до начала обработки запросов."""

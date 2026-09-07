@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -46,12 +47,15 @@ def test_aggregate_purchase_batch_returns_empty_list_for_empty_batch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_purchase_batch_returns_aggregates() -> None:
+async def test_process_purchase_batch_saves_and_returns_aggregates() -> None:
     batch = [
         make_purchase_event(2, tickets_count=1, total_amount=1500),
         make_purchase_event(2, tickets_count=2, total_amount=3000),
     ]
+    save_aggregates = AsyncMock(return_value=uuid4())
 
-    aggregates = await process_purchase_batch(batch)
+    aggregates = await process_purchase_batch(batch, save_aggregates=save_aggregates)
 
-    assert aggregates == [PaymentActivityAggregate(event_id=2, payments_count=2, tickets_count=3, total_amount=4500)]
+    expected = [PaymentActivityAggregate(event_id=2, payments_count=2, tickets_count=3, total_amount=4500)]
+    assert aggregates == expected
+    save_aggregates.assert_awaited_once_with(expected)
