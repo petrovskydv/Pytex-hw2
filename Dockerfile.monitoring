@@ -5,9 +5,6 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-COPY monitoring/requirements.txt /tmp/monitoring-requirements.txt
-RUN uv pip install --python .venv/bin/python --no-deps -r /tmp/monitoring-requirements.txt
+RUN uv sync --frozen --no-default-groups --group monitoring --no-install-project
 
 COPY . .
