@@ -54,6 +54,4 @@ async def test_process_purchase_batch_returns_aggregates() -> None:
 
     aggregates = await process_purchase_batch(batch)
 
-    assert aggregates == [
-        PaymentActivityAggregate(event_id=2, payments_count=2, tickets_count=3, total_amount=4500)
-    ]
+    assert aggregates == [PaymentActivityAggregate(event_id=2, payments_count=2, tickets_count=3, total_amount=4500)]
