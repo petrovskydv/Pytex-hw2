@@ -19,11 +19,12 @@ class EventCollector:
             self.ready.set()
 
 
-def test_purchase_event_contains_required_fields_and_repeated_event_ids() -> None:
-    async def unused_sink(_: TicketPurchasedEvent) -> None:
-        return None
+async def discard_event(_: TicketPurchasedEvent) -> None:
+    return None
 
-    generator = PurchaseEventGenerator(unused_sink, event_id_max=5)
+
+def test_purchase_event_contains_required_fields_and_repeated_event_ids() -> None:
+    generator = PurchaseEventGenerator(discard_event, event_id_max=5)
     events = [generator.create_event() for _ in range(6)]
 
     assert len({event.payment_id for event in events}) == 6
