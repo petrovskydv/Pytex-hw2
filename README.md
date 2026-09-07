@@ -36,6 +36,29 @@
 
 API доступен по адресу http://127.0.0.1:8000, Swagger UI - http://127.0.0.1:8000/docs.
 
+### Фоновые задачи TaskIQ
+
+Для запуска фоновых задач используются три независимые очереди: `reports`, `cleanup`, `insurance`.
+После запуска инфраструктуры откройте четыре дополнительных терминала:
+
+```bash
+uv run taskiq worker --workers 2 --max-async-tasks 1 --max-threadpool-threads 1 \
+  app.background.brokers:reports_broker app.background.jobs
+uv run taskiq worker --workers 1 --max-async-tasks 1 \
+  app.background.brokers:cleanup_broker app.background.jobs
+uv run taskiq worker --workers 1 --max-async-tasks 10 \
+  app.background.brokers:insurance_broker app.background.jobs
+uv run taskiq scheduler --skip-first-run app.background.brokers:scheduler app.background.jobs
+```
+
+Scheduler должен запускаться только в одном экземпляре. PDF-отчёты сохраняются в каталог `reports/`.
+
+Весь стек вместе с миграцией, API, workers и scheduler можно запустить одной командой:
+
+```bash
+docker compose up --build
+```
+
 ## Линтер
 
 ```bash
@@ -72,6 +95,7 @@ uv run pre-commit run --all-files
 | Redis | `localhost:7379` |
 | Payment API | http://localhost:9001 |
 | Protection API | http://localhost:9002 |
+| FastAPI | http://localhost:8000 |
 
 Остановить инфраструктуру:
 

@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from app.domain.exceptions import PaymentCalculationError
+from app.domain.exceptions import PaymentCalculationError, ProtectionCalculationError
 from app.infrastructure.api_clients.base import BaseApiClient
 from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
@@ -159,3 +159,24 @@ async def test_protection_timeout_returns_no_calculation(monkeypatch) -> None:
         )
 
     assert protection_calculation is None
+
+
+async def test_protection_calculate_once_does_not_retry_error() -> None:
+    """Один запуск фоновой попытки выполняет ровно один HTTP-запрос."""
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.raises(ProtectionCalculationError):
+            await ProtectionClient(http_client, "http://protection").calculate_once(
+                1,
+                5000,
+                "conference",
+                "2030-01-01T00:00:00",
+            )
+
+    assert calls == 1

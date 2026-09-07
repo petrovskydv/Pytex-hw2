@@ -13,6 +13,7 @@ from tenacity import (
 )
 
 from app.domain.dto import ProtectionCalculationDTO
+from app.domain.exceptions import ProtectionCalculationError
 from app.infrastructure.api_clients.base import BaseApiClient
 
 REQUEST_TIMEOUT_SECONDS = 3
@@ -24,6 +25,29 @@ RETRIABLE_STATUS_CODES = {500, 503}
 
 
 class ProtectionClient(BaseApiClient):
+    async def calculate_once(
+        self,
+        booking_id: int,
+        ticket_amount: int,
+        event_category: str,
+        event_starts_at: str,
+    ) -> ProtectionCalculationDTO:
+        """Выполняет ровно один запрос к сервису страховки."""
+        endpoint = "/protection/calculate"
+        payload = {
+            "booking_id": booking_id,
+            "ticket_amount": ticket_amount,
+            "event_category": event_category,
+            "event_starts_at": event_starts_at,
+        }
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT_SECONDS):
+                response = await self._post(endpoint, payload)
+                response.raise_for_status()
+                return ProtectionCalculationDTO.model_validate(response.json())
+        except (TimeoutError, httpx.HTTPError, JSONDecodeError, ValidationError) as error:
+            raise ProtectionCalculationError from error
+
     async def calculate(
         self,
         booking_id: int,

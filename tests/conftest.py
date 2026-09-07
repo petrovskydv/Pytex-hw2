@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from sqlalchemy import text
@@ -108,3 +108,17 @@ def protection_client():
         covered_amount=5000,
     )
     return client
+
+
+@pytest.fixture
+def protection_retry_dispatcher():
+    dispatcher = AsyncMock()
+    dispatcher.enqueue = AsyncMock()
+    return dispatcher
+
+
+@pytest.fixture
+def dashboard_report_dispatcher():
+    dispatcher = AsyncMock()
+    dispatcher.enqueue = AsyncMock()
+    return dispatcher

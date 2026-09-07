@@ -49,6 +49,20 @@ class EventSeatRepository(BaseRepository):
         )
         await self._session.execute(statement)
 
+    async def release_reservations(self, booking_ids: list[int]) -> None:
+        """Освобождает места нескольких броней в текущей транзакции."""
+        if not booking_ids:
+            return
+        statement = (
+            update(EventSeat)
+            .where(
+                EventSeat.booking_id.in_(booking_ids),
+                EventSeat.status == SeatStatus.reserved,
+            )
+            .values(status=SeatStatus.available, booking_id=None, reserved_until=None)
+        )
+        await self._session.execute(statement)
+
     async def get_occupancy_dashboard(self, event_id: int) -> OccupancyDashboardDTO:
         statement = select(
             func.coalesce(func.count(EventSeat.id), 0),
