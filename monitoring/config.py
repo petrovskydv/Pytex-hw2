@@ -5,13 +5,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseModel):
-    """Monitoring PostgreSQL settings."""
+    """Настройки PostgreSQL сервиса мониторинга."""
 
     url: PostgresDsn
 
 
 class KafkaSettings(BaseModel):
-    """Monitoring Kafka settings."""
+    """Настройки Kafka сервиса мониторинга."""
 
     bootstrap_servers: str = "localhost:9092"
     topic: str = "tickets.purchased"
@@ -19,7 +19,7 @@ class KafkaSettings(BaseModel):
 
 
 class MonitoringSettings(BaseSettings):
-    """Configuration of the purchase monitoring service."""
+    """Конфигурация сервиса мониторинга покупок."""
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
 
