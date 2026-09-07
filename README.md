@@ -67,15 +67,15 @@ Monitoring — отдельное FastAPI-приложение с собстве
 подготовлен его lifecycle и WebSocket-ручка `WS /ws/payments`; обработка событий и рассылка будут добавляться
 в следующих задачах.
 
+Зависимости monitoring-сервиса находятся в группе `monitoring` в `pyproject.toml`. Группа включена в `dev`,
+поэтому обычный `uv sync` устанавливает их для локальной разработки и тестов. Docker-образ monitoring
+устанавливает эту группу отдельно.
+
 Для запуска с хоста:
 
 ```bash
-uv run --with-requirements monitoring/requirements.txt \
-  uvicorn monitoring.main:app --host 127.0.0.1 --port 8001
+uv run uvicorn monitoring.main:app --host 127.0.0.1 --port 8001
 ```
-
-В Docker Compose сервис `monitoring` собирается отдельным `Dockerfile.monitoring`, а Kafka-клиент имеет свой
-минимальный набор зависимостей в `monitoring/requirements.txt`.
 
 Весь стек вместе с миграцией, API, monitoring, workers, scheduler и Kafka можно запустить одной командой:
 
