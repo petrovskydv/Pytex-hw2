@@ -104,6 +104,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
 
   monitoring:
     build:
