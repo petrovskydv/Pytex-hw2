@@ -5,7 +5,7 @@ router = APIRouter()
 
 @router.websocket("/ws/payments")
 async def payments_websocket(websocket: WebSocket) -> None:
-    """Keep a manager connection open; broadcasting is added in task 9."""
+    """Поддерживает WebSocket-соединение; рассылка будет добавлена в следующей задаче."""
     await websocket.accept()
     try:
         while True:
