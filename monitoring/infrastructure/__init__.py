@@ -1,1 +1,1 @@
-"""Infrastructure adapters used by the monitoring service."""
+"""Инфраструктурные адаптеры сервиса мониторинга."""
