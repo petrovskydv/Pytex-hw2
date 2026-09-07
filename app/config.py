@@ -102,6 +102,16 @@ class KafkaSettings(BaseModel):
     """Таймаут отправки одному WebSocket-клиенту."""
 
 
+class PurchaseGeneratorSettings(BaseModel):
+    """Настройки фонового генератора тестовых покупок."""
+
+    interval_seconds: PositiveFloat = 0.05
+    """Пауза между покупками; 50 мс создают до десяти событий за 500 мс."""
+
+    event_id_max: PositiveInt = 5
+    """Верхняя граница небольшого диапазона event_id, начиная с 1."""
+
+
 class Settings(BaseSettings):
     """Конфигурация приложения."""
 
@@ -130,6 +140,9 @@ class Settings(BaseSettings):
 
     kafka: KafkaSettings = KafkaSettings()
     """Настройки Kafka и потока событий о покупках."""
+
+    purchase_generator: PurchaseGeneratorSettings = PurchaseGeneratorSettings()
+    """Настройки фонового генератора тестовых покупок."""
 
     @model_validator(mode="after")
     def validate_event_lock_timeout(self) -> "Settings":
