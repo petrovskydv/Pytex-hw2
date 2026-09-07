@@ -13,6 +13,7 @@ from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.add_event_data import add_event_data_to_db
 from app.infrastructure.database.db import session_factory
 from app.services.event_views import EventViewQueue
+from app.services.purchase_generator import PurchaseEventGenerator, log_generated_purchase
 
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
     )
     http_client = httpx.AsyncClient()
     event_view_queue: EventViewQueue | None = None
+    purchase_event_generator: PurchaseEventGenerator | None = None
     try:
         app.state.payment_client = PaymentClient(http_client, settings.external_apis.payment_api_url)
         app.state.protection_client = ProtectionClient(http_client, settings.external_apis.protection_api_url)
@@ -43,18 +45,30 @@ async def lifespan(app: FastAPI):
         )
         event_view_queue.start()
         app.state.event_view_queue = event_view_queue
+
+        purchase_event_generator = PurchaseEventGenerator(
+            log_generated_purchase,
+            interval_seconds=settings.purchase_generator.interval_seconds,
+            event_id_max=settings.purchase_generator.event_id_max,
+        )
+        purchase_event_generator.start()
+        app.state.purchase_event_generator = purchase_event_generator
         yield
     finally:
         try:
-            if event_view_queue:
-                await event_view_queue.stop()
+            if purchase_event_generator:
+                await purchase_event_generator.stop()
         finally:
             try:
-                await reports_broker.shutdown()
-                await insurance_broker.shutdown()
+                if event_view_queue:
+                    await event_view_queue.stop()
             finally:
-                await http_client.aclose()
-                await redis.aclose()
+                try:
+                    await reports_broker.shutdown()
+                    await insurance_broker.shutdown()
+                finally:
+                    await http_client.aclose()
+                    await redis.aclose()
 
 
 app = FastAPI(title="API Афиши", lifespan=lifespan)
