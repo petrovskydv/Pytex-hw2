@@ -1,0 +1,149 @@
+name: Verify HW5 task 5
+
+on:
+  push:
+    branches:
+      - hw-5
+    paths:
+      - .github/workflows/verify-hw5-task5.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hw-5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+      - run: uv sync --python 3.13 --frozen
+      - run: cp .env.example .env
+      - run: >-
+          uv run ruff check
+          monitoring/domain
+          monitoring/services/purchase_batches.py
+          monitoring/main.py
+          tests/test_monitoring_aggregation.py
+      - run: >-
+          uv run ruff format --check
+          monitoring/domain
+          monitoring/services/purchase_batches.py
+          monitoring/main.py
+          tests/test_monitoring_aggregation.py
+      - run: uv run pytest tests/test_monitoring_aggregation.py tests/test_monitoring_kafka_batches.py
+      - run: uv run pytest
+      - run: docker compose config --quiet
+      - name: Start Kafka
+        run: docker compose up -d kafka
+      - name: Wait for Kafka
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --list >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs kafka
+          exit 1
+      - name: Verify real Kafka aggregation
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          from datetime import UTC, datetime
+          from uuid import uuid4
+
+          from aiokafka import AIOKafkaProducer
+
+          from app.domain.dto import TicketPurchasedEvent
+          from monitoring.config import KafkaSettings
+          from monitoring.domain.dto import PaymentActivityAggregate
+          from monitoring.infrastructure.kafka import MonitoringKafka
+          from monitoring.services.purchase_batches import aggregate_purchase_batch
+
+
+          def make_event(event_id: int, tickets_count: int, total_amount: int) -> TicketPurchasedEvent:
+              return TicketPurchasedEvent(
+                  payment_id=uuid4(),
+                  event_id=event_id,
+                  tickets_count=tickets_count,
+                  total_amount=total_amount,
+                  paid_at=datetime.now(UTC),
+              )
+
+
+          async def main() -> None:
+              topic = "tickets.purchased.task5"
+              events = [
+                  make_event(3, 2, 4000),
+                  make_event(1, 1, 3000),
+                  make_event(3, 3, 6000),
+                  make_event(5, 2, 5000),
+                  make_event(3, 1, 2000),
+              ]
+
+              producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+              await producer.start()
+              try:
+                  for event in events:
+                      await producer.send_and_wait(topic, event.model_dump_json().encode())
+              finally:
+                  await producer.stop()
+
+              loop = asyncio.get_running_loop()
+              received = loop.create_future()
+
+              async def handler(batch: list[TicketPurchasedEvent]) -> None:
+                  if not received.done():
+                      received.set_result(aggregate_purchase_batch(batch))
+
+              consumer = MonitoringKafka(
+                  KafkaSettings(
+                      bootstrap_servers="localhost:9092",
+                      topic=topic,
+                      consumer_group="task5-aggregation",
+                      max_records=10,
+                      batch_timeout_ms=500,
+                  ),
+                  batch_handler=handler,
+              )
+              await consumer.start()
+              try:
+                  aggregates = await asyncio.wait_for(received, timeout=2)
+              finally:
+                  await consumer.stop()
+
+              assert aggregates == [
+                  PaymentActivityAggregate(event_id=3, payments_count=3, tickets_count=6, total_amount=12000),
+                  PaymentActivityAggregate(event_id=1, payments_count=1, tickets_count=1, total_amount=3000),
+                  PaymentActivityAggregate(event_id=5, payments_count=1, tickets_count=2, total_amount=5000),
+              ], aggregates
+              print([item.model_dump() for item in aggregates])
+
+
+          asyncio.run(main())
+          PY
+      - name: Start application stack
+        run: |
+          if ! docker compose up -d --build db redis kafka payment-api protection-api migrate app monitoring; then
+            docker compose ps -a
+            docker compose logs db redis kafka payment-api protection-api migrate app monitoring
+            exit 1
+          fi
+      - name: Check services
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/openapi.json >/dev/null \
+              && curl --fail --silent http://127.0.0.1:8001/openapi.json >/dev/null; then
+              docker compose ps
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps -a
+          docker compose logs app monitoring kafka
+          exit 1
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
