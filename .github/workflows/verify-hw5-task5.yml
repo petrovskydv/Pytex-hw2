@@ -1,5 +1,6 @@
 name: Verify HW5 task 5
 
+# Повторный прогон после применения ruff format.
 on:
   push:
     branches:
