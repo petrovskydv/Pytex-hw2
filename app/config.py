@@ -77,6 +77,31 @@ class TaskiqSettings(BaseModel):
     """Задержка между двумя фоновыми попытками расчёта защиты."""
 
 
+class KafkaSettings(BaseModel):
+    """Настройки Kafka для событий о покупках билетов."""
+
+    bootstrap_servers: str = "localhost:9092"
+    """Адрес Kafka broker для подключения producer и consumer."""
+
+    topic: str = "tickets.purchased"
+    """Topic доменного события о состоявшейся покупке билетов."""
+
+    linger_ms: PositiveInt = 75
+    """Окно накопления сообщений producer перед сетевой отправкой."""
+
+    consumer_group: str = "payment-monitor"
+    """Consumer group сервиса мониторинга покупок."""
+
+    max_records: PositiveInt = 10
+    """Максимальное число событий в одном batch."""
+
+    batch_timeout_ms: PositiveInt = 500
+    """Максимальное ожидание неполного batch в миллисекундах."""
+
+    websocket_send_timeout_seconds: PositiveFloat = 2
+    """Таймаут отправки одному WebSocket-клиенту."""
+
+
 class Settings(BaseSettings):
     """Конфигурация приложения."""
 
@@ -102,6 +127,9 @@ class Settings(BaseSettings):
 
     taskiq: TaskiqSettings = TaskiqSettings()
     """Настройки фоновых задач."""
+
+    kafka: KafkaSettings = KafkaSettings()
+    """Настройки Kafka и потока событий о покупках."""
 
     @model_validator(mode="after")
     def validate_event_lock_timeout(self) -> "Settings":
