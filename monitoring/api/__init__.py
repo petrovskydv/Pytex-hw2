@@ -1,1 +1,1 @@
-"""HTTP and WebSocket routes of the monitoring service."""
+"""HTTP- и WebSocket-маршруты сервиса мониторинга."""
