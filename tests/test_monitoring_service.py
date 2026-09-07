@@ -21,6 +21,33 @@ class FakeResource:
         self.calls.append(f"{self.name}.stop")
 
 
+class FailingKafka(FakeResource):
+    async def start(self) -> None:
+        self.calls.append("kafka.start")
+        raise RuntimeError("Kafka unavailable")
+
+
+class FakeConsumer:
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self.captured = captured
+
+    async def start(self) -> None:
+        self.captured["started"] = True
+
+    async def stop(self) -> None:
+        self.captured["stopped"] = True
+
+
+class FakeConsumerFactory:
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self.captured = captured
+
+    def __call__(self, *args: Any, **kwargs: Any) -> FakeConsumer:
+        self.captured["args"] = args
+        self.captured["kwargs"] = kwargs
+        return FakeConsumer(self.captured)
+
+
 @pytest.mark.asyncio
 async def test_monitoring_lifespan_owns_resources() -> None:
     calls: list[str] = []
@@ -53,12 +80,6 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
         kafka=KafkaSettings(),
     )
     database = FakeResource("database", calls)
-
-    class FailingKafka(FakeResource):
-        async def start(self) -> None:
-            self.calls.append("kafka.start")
-            raise RuntimeError("Kafka unavailable")
-
     kafka = FailingKafka("kafka", calls)
     app = create_app(
         settings_factory=lambda: settings,
@@ -76,20 +97,8 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
 @pytest.mark.asyncio
 async def test_kafka_connection_disables_auto_commit() -> None:
     captured: dict[str, Any] = {}
+    connection = MonitoringKafka(KafkaSettings(), consumer_factory=FakeConsumerFactory(captured))
 
-    class FakeConsumer:
-        async def start(self) -> None:
-            captured["started"] = True
-
-        async def stop(self) -> None:
-            captured["stopped"] = True
-
-    def consumer_factory(*args: Any, **kwargs: Any) -> FakeConsumer:
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return FakeConsumer()
-
-    connection = MonitoringKafka(KafkaSettings(), consumer_factory=consumer_factory)
     await connection.start()
     await connection.stop()
 
