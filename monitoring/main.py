@@ -9,7 +9,7 @@ from monitoring.api.routes import router
 from monitoring.config import MonitoringSettings, get_settings
 from monitoring.infrastructure.database import MonitoringDatabase
 from monitoring.infrastructure.kafka import MonitoringKafka
-from monitoring.services.purchase_batches import log_purchase_batch
+from monitoring.services.purchase_batches import process_purchase_batch
 
 SettingsFactory = Callable[[], MonitoringSettings]
 DatabaseFactory = Callable[[str], Any]
@@ -25,7 +25,7 @@ async def lifespan(
 ) -> AsyncIterator[None]:
     settings = settings_factory()
     database = database_factory(str(settings.database.url))
-    kafka = kafka_factory(settings.kafka, log_purchase_batch)
+    kafka = kafka_factory(settings.kafka, process_purchase_batch)
 
     try:
         await database.start()
