@@ -24,7 +24,12 @@ jobs:
       - run: uv run pytest
       - run: docker compose config --quiet
       - name: Start monitoring stack
-        run: docker compose up -d --build db kafka migrate monitoring
+        run: |
+          if ! docker compose up -d --build db kafka migrate monitoring; then
+            docker compose ps -a
+            docker compose logs migrate kafka db monitoring
+            exit 1
+          fi
       - name: Check monitoring HTTP startup
         run: |
           for attempt in $(seq 1 30); do
@@ -33,7 +38,7 @@ jobs:
             fi
             sleep 2
           done
-          docker compose ps
+          docker compose ps -a
           docker compose logs monitoring kafka db migrate
           exit 1
       - name: Show service state
