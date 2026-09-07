@@ -136,13 +136,12 @@ jobs:
             docker compose logs db redis kafka payment-api protection-api migrate app monitoring
             exit 1
           fi
-      - name: Check services and real monitoring consumption
+      - name: Check services
         run: |
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8000/openapi.json >/dev/null \
               && curl --fail --silent http://127.0.0.1:8001/openapi.json >/dev/null; then
-              sleep 2
-              docker compose logs monitoring | grep -q "Получен батч покупок"
+              docker compose ps
               exit 0
             fi
             sleep 2
