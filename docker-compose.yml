@@ -80,7 +80,6 @@ services:
       KAFKA__CONSUMER_GROUP: payment-monitor
       KAFKA__MAX_RECORDS: 10
       KAFKA__BATCH_TIMEOUT_MS: 500
-      KAFKA__WEBSOCKET_SEND_TIMEOUT_SECONDS: 2
       PURCHASE_GENERATOR__INTERVAL_SECONDS: 0.05
       PURCHASE_GENERATOR__EVENT_ID_MAX: 5
     depends_on:
@@ -119,6 +118,7 @@ services:
       KAFKA__CONSUMER_GROUP: payment-monitor
       KAFKA__MAX_RECORDS: 10
       KAFKA__BATCH_TIMEOUT_MS: 500
+      WEBSOCKET__SEND_TIMEOUT_SECONDS: 2
     ports:
       - "8001:8001"
     depends_on:

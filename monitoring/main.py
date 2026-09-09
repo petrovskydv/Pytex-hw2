@@ -13,6 +13,10 @@ from monitoring.infrastructure.database import MonitoringDatabase
 from monitoring.infrastructure.kafka import MonitoringKafka
 from monitoring.infrastructure.repositories import PaymentActivityRepository
 from monitoring.services.purchase_batches import process_purchase_batch
+from monitoring.services.websocket_delivery import (
+    PaymentActivityWebSocketWorker,
+    WebSocketConnectionManager,
+)
 
 SettingsFactory = Callable[[], MonitoringSettings]
 DatabaseFactory = Callable[[str], Any]
@@ -31,20 +35,32 @@ async def lifespan(
     repository = PaymentActivityRepository(database.session_factory)
     batch_handler = partial(process_purchase_batch, save_aggregates=repository.save_batch)
     payment_activity_queue: asyncio.Queue[list[PaymentActivityAggregate]] = asyncio.Queue()
+    websocket_manager = WebSocketConnectionManager()
+    websocket_worker = PaymentActivityWebSocketWorker(
+        payment_activity_queue,
+        websocket_manager,
+        settings.websocket.send_timeout_seconds,
+    )
     kafka = kafka_factory(settings.kafka, batch_handler, payment_activity_queue)
 
     try:
         await database.start()
+        websocket_worker.start()
         await kafka.start()
         app.state.database = database
         app.state.kafka = kafka
         app.state.payment_activity_queue = payment_activity_queue
+        app.state.websocket_manager = websocket_manager
+        app.state.websocket_worker = websocket_worker
         yield
     finally:
         try:
             await kafka.stop()
         finally:
-            await database.stop()
+            try:
+                await websocket_worker.stop()
+            finally:
+                await database.stop()
 
 
 def create_app(

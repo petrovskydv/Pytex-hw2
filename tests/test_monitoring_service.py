@@ -6,10 +6,11 @@ import pytest
 from starlette.routing import WebSocketRoute
 
 from app.domain.dto import TicketPurchasedEvent
-from monitoring.config import KafkaSettings
+from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.infrastructure.kafka import MonitoringKafka, deserialize_ticket_purchase
 from monitoring.main import create_app
+from monitoring.services.websocket_delivery import WebSocketConnectionManager
 
 
 class FakeResource:
@@ -67,13 +68,18 @@ async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[Payme
     return []
 
 
+def make_settings() -> SimpleNamespace:
+    return SimpleNamespace(
+        database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
+        kafka=KafkaSettings(),
+        websocket=WebSocketSettings(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_monitoring_lifespan_owns_resources() -> None:
     calls: list[str] = []
-    settings = SimpleNamespace(
-        database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
-        kafka=KafkaSettings(),
-    )
+    settings = make_settings()
     database = FakeDatabase("database", calls)
     kafka = FakeResource("kafka", calls)
 
@@ -87,6 +93,8 @@ async def test_monitoring_lifespan_owns_resources() -> None:
         assert app.state.database is database
         assert app.state.kafka is kafka
         assert isinstance(app.state.payment_activity_queue, asyncio.Queue)
+        assert isinstance(app.state.websocket_manager, WebSocketConnectionManager)
+        assert app.state.websocket_worker is not None
         assert calls == ["database.start", "kafka.start"]
 
     assert calls == ["database.start", "kafka.start", "kafka.stop", "database.stop"]
@@ -95,10 +103,7 @@ async def test_monitoring_lifespan_owns_resources() -> None:
 @pytest.mark.asyncio
 async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
     calls: list[str] = []
-    settings = SimpleNamespace(
-        database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
-        kafka=KafkaSettings(),
-    )
+    settings = make_settings()
     database = FakeDatabase("database", calls)
     kafka = FailingKafka("kafka", calls)
     app = create_app(
@@ -140,10 +145,6 @@ async def test_kafka_connection_disables_auto_commit() -> None:
 
 
 def test_payments_websocket_route_is_registered() -> None:
-    settings = SimpleNamespace(
-        database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
-        kafka=KafkaSettings(),
-    )
-    app = create_app(settings_factory=lambda: settings)
+    app = create_app(settings_factory=make_settings)
 
     assert any(isinstance(route, WebSocketRoute) and route.path == "/ws/payments" for route in app.routes)

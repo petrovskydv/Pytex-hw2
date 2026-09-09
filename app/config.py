@@ -98,9 +98,6 @@ class KafkaSettings(BaseModel):
     batch_timeout_ms: PositiveInt = 500
     """Максимальное ожидание неполного batch в миллисекундах."""
 
-    websocket_send_timeout_seconds: PositiveFloat = 2
-    """Таймаут отправки одному WebSocket-клиенту."""
-
 
 class PurchaseGeneratorSettings(BaseModel):
     """Настройки фонового генератора тестовых покупок."""
@@ -124,7 +121,7 @@ class Settings(BaseSettings):
     """Настройки Redis."""
 
     external_apis: ExternalApiSettings
-    """Настройки внешних API."""
+    """Адреса внешних API."""
 
     booking: BookingSettings
     """Настройки бронирования."""
@@ -136,7 +133,7 @@ class Settings(BaseSettings):
     """Настройки батчинга просмотров."""
 
     taskiq: TaskiqSettings = TaskiqSettings()
-    """Настройки фоновых задач."""
+    """Настройки фоновых задач TaskIQ."""
 
     kafka: KafkaSettings = KafkaSettings()
     """Настройки Kafka и потока событий о покупках."""

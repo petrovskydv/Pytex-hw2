@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import BaseModel, PostgresDsn
+from pydantic import BaseModel, Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +21,12 @@ class KafkaSettings(BaseModel):
     batch_timeout_ms: int = 500
 
 
+class WebSocketSettings(BaseModel):
+    """Настройки WebSocket-рассылки сервиса мониторинга."""
+
+    send_timeout_seconds: Annotated[float, Field(gt=0, le=2)] = 2
+
+
 class MonitoringSettings(BaseSettings):
     """Конфигурация сервиса мониторинга покупок."""
 
@@ -27,6 +34,7 @@ class MonitoringSettings(BaseSettings):
 
     database: DatabaseSettings
     kafka: KafkaSettings = KafkaSettings()
+    websocket: WebSocketSettings = WebSocketSettings()
 
 
 @lru_cache

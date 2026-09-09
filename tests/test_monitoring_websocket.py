@@ -1,0 +1,134 @@
+import asyncio
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+from starlette.websockets import WebSocketState
+
+from monitoring.config import WebSocketSettings
+from monitoring.domain.dto import PaymentActivityAggregate
+from monitoring.services.websocket_delivery import (
+    PaymentActivityWebSocketWorker,
+    WebSocketConnectionManager,
+    build_payment_activity_message,
+)
+
+
+class FakeWebSocket:
+    def __init__(
+        self,
+        *,
+        send_delay_seconds: float = 0,
+        send_error: Exception | None = None,
+    ) -> None:
+        self.send_delay_seconds = send_delay_seconds
+        self.send_error = send_error
+        self.client_state = WebSocketState.CONNECTED
+        self.application_state = WebSocketState.CONNECTED
+        self.accepted = False
+        self.sent_messages: list[dict[str, Any]] = []
+        self.send_started = asyncio.Event()
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def send_json(self, message: dict[str, Any]) -> None:
+        self.send_started.set()
+        if self.send_delay_seconds:
+            await asyncio.sleep(self.send_delay_seconds)
+        if self.send_error is not None:
+            raise self.send_error
+        self.sent_messages.append(message)
+
+
+def make_aggregate(event_id: int = 3) -> PaymentActivityAggregate:
+    return PaymentActivityAggregate(
+        event_id=event_id,
+        payments_count=2,
+        tickets_count=6,
+        total_amount=12000,
+    )
+
+
+def test_websocket_timeout_cannot_exceed_two_seconds() -> None:
+    with pytest.raises(ValidationError):
+        WebSocketSettings(send_timeout_seconds=2.1)
+
+
+def test_build_payment_activity_message() -> None:
+    aggregate = make_aggregate()
+
+    message = build_payment_activity_message([aggregate])
+
+    assert message == {
+        "type": "payment_activity",
+        "items": [
+            {
+                "event_id": 3,
+                "payments_count": 2,
+                "tickets_count": 6,
+                "total_amount": 12000,
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_broadcast_sends_to_clients_concurrently_and_keeps_timeout_client() -> None:
+    manager = WebSocketConnectionManager()
+    slow = FakeWebSocket(send_delay_seconds=0.2)
+    fast = FakeWebSocket()
+
+    await manager.connect(slow)
+    await manager.connect(fast)
+
+    broadcast_task = asyncio.create_task(manager.broadcast([make_aggregate()], timeout_seconds=0.05))
+    await asyncio.wait_for(fast.send_started.wait(), timeout=0.02)
+    await broadcast_task
+
+    assert fast.sent_messages
+    assert slow.sent_messages == []
+    assert manager.active_count == 2
+
+
+@pytest.mark.asyncio
+async def test_broadcast_removes_client_with_closed_connection_error() -> None:
+    manager = WebSocketConnectionManager()
+    closed = FakeWebSocket(send_error=RuntimeError("closed"))
+    await manager.connect(closed)
+    closed.application_state = WebSocketState.DISCONNECTED
+
+    await manager.broadcast([make_aggregate()], timeout_seconds=0.05)
+
+    assert manager.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_websocket_worker_reads_queue_and_sends_saved_aggregates() -> None:
+    queue: asyncio.Queue[list[PaymentActivityAggregate]] = asyncio.Queue()
+    manager = WebSocketConnectionManager()
+    client = FakeWebSocket()
+    await manager.connect(client)
+    worker = PaymentActivityWebSocketWorker(queue, manager, send_timeout_seconds=0.05)
+    worker.start()
+
+    try:
+        await queue.put([make_aggregate()])
+        await asyncio.wait_for(client.send_started.wait(), timeout=1)
+        await asyncio.wait_for(queue.join(), timeout=1)
+    finally:
+        await worker.stop()
+
+    assert client.sent_messages == [
+        {
+            "type": "payment_activity",
+            "items": [
+                {
+                    "event_id": 3,
+                    "payments_count": 2,
+                    "tickets_count": 6,
+                    "total_amount": 12000,
+                }
+            ],
+        }
+    ]
