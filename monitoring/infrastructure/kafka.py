@@ -1,6 +1,8 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
 from aiokafka import AIOKafkaConsumer
@@ -8,7 +10,18 @@ from aiokafka import AIOKafkaConsumer
 from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings
 
+logger = logging.getLogger(__name__)
+
 PurchaseBatchHandler = Callable[[list[TicketPurchasedEvent]], Awaitable[None]]
+
+
+@dataclass(slots=True)
+class PurchaseKafkaBatch:
+    """Kafka-батч с событиями и границами offsets по partition."""
+
+    events: list[TicketPurchasedEvent]
+    commit_offsets: dict[Any, int]
+    retry_offsets: dict[Any, int]
 
 
 def deserialize_ticket_purchase(value: bytes) -> TicketPurchasedEvent:
@@ -16,37 +29,46 @@ def deserialize_ticket_purchase(value: bytes) -> TicketPurchasedEvent:
     return TicketPurchasedEvent.model_validate_json(value)
 
 
-def extract_purchase_events(records_by_partition: dict[Any, list[Any]]) -> list[TicketPurchasedEvent]:
-    """Извлекает события из результата AIOKafkaConsumer.getmany."""
-    return [record.value for records in records_by_partition.values() for record in records]
-
-
 async def collect_purchase_batch(
     consumer: Any,
     *,
     max_records: int,
     batch_timeout_ms: int,
-) -> list[TicketPurchasedEvent]:
-    """Собирает до max_records событий не дольше batch_timeout_ms."""
-    batch: list[TicketPurchasedEvent] = []
+) -> PurchaseKafkaBatch:
+    """Собирает до max_records событий и offsets не дольше batch_timeout_ms."""
+    events: list[TicketPurchasedEvent] = []
+    commit_offsets: dict[Any, int] = {}
+    retry_offsets: dict[Any, int] = {}
     loop = asyncio.get_running_loop()
     deadline = loop.time() + batch_timeout_ms / 1000
 
-    while len(batch) < max_records:
+    while len(events) < max_records:
         remaining_seconds = deadline - loop.time()
         if remaining_seconds <= 0:
             break
 
         records_by_partition = await consumer.getmany(
             timeout_ms=max(1, int(remaining_seconds * 1000)),
-            max_records=max_records - len(batch),
+            max_records=max_records - len(events),
         )
-        events = extract_purchase_events(records_by_partition)
-        if not events:
-            break
-        batch.extend(events)
+        records_received = 0
+        for partition, records in records_by_partition.items():
+            if not records:
+                continue
 
-    return batch
+            retry_offsets.setdefault(partition, records[0].offset)
+            commit_offsets[partition] = records[-1].offset + 1
+            events.extend(record.value for record in records)
+            records_received += len(records)
+
+        if records_received == 0:
+            break
+
+    return PurchaseKafkaBatch(
+        events=events,
+        commit_offsets=commit_offsets,
+        retry_offsets=retry_offsets,
+    )
 
 
 class MonitoringKafka:
@@ -114,5 +136,15 @@ class MonitoringKafka:
                 max_records=self._settings.max_records,
                 batch_timeout_ms=self._settings.batch_timeout_ms,
             )
-            if batch:
-                await self._batch_handler(batch)
+            if not batch.events:
+                continue
+
+            try:
+                await self._batch_handler(batch.events)
+            except Exception:
+                for partition, offset in batch.retry_offsets.items():
+                    consumer.seek(partition, offset)
+                logger.exception("Не удалось обработать Kafka-батч; offsets не подтверждены")
+                continue
+
+            await consumer.commit(batch.commit_offsets)
