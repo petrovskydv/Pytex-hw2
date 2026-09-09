@@ -53,8 +53,7 @@ def make_aggregate(event_id: int = 3) -> PaymentActivityAggregate:
 
 def test_payments_websocket_route_is_registered() -> None:
     assert any(
-        isinstance(route, WebSocketRoute) and route.path == "/ws/payments"
-        for route in monitoring_main.app.routes
+        isinstance(route, WebSocketRoute) and route.path == "/ws/payments" for route in monitoring_main.app.routes
     )
 
 
