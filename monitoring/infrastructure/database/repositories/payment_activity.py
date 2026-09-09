@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from monitoring.domain.dto import PaymentActivityAggregate
-from monitoring.infrastructure.models import EventPaymentActivity
+from monitoring.infrastructure.database.models import EventPaymentActivity
 
 
 class PaymentActivityRepository:

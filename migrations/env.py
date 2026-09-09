@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.config import settings
 from app.infrastructure.database.models import Base as AppBase
-from monitoring.infrastructure.models import Base as MonitoringBase
+from monitoring.infrastructure.database.models import Base as MonitoringBase
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

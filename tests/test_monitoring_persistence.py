@@ -6,8 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from monitoring.domain.dto import PaymentActivityAggregate
-from monitoring.infrastructure.models import EventPaymentActivity
-from monitoring.infrastructure.repositories import PaymentActivityRepository
+from monitoring.infrastructure.database.models import EventPaymentActivity
+from monitoring.infrastructure.database.repositories.payment_activity import PaymentActivityRepository
 
 
 def make_aggregate(
