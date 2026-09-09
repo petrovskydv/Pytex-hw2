@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from starlette.routing import WebSocketRoute
 
+import monitoring.main as monitoring_main
 from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate
@@ -25,10 +26,12 @@ class FakeResource:
         self.calls.append(f"{self.name}.stop")
 
 
-class FakeDatabase(FakeResource):
-    def __init__(self, name: str, calls: list[str]) -> None:
-        super().__init__(name, calls)
-        self.session_factory = object()
+class FakeEngine:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def dispose(self) -> None:
+        self.calls.append("database.dispose")
 
 
 class FailingKafka(FakeResource):
@@ -70,45 +73,41 @@ async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[Payme
 
 def make_settings() -> SimpleNamespace:
     return SimpleNamespace(
-        database=SimpleNamespace(url="postgresql+psycopg://postgres:postgres@db:5432/postgres"),
         kafka=KafkaSettings(),
         websocket=WebSocketSettings(),
     )
 
 
 @pytest.mark.asyncio
-async def test_monitoring_lifespan_owns_resources() -> None:
+async def test_monitoring_lifespan_owns_resources(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     settings = make_settings()
-    database = FakeDatabase("database", calls)
     kafka = FakeResource("kafka", calls)
+    monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
 
     app = create_app(
         settings_factory=lambda: settings,
-        database_factory=lambda _: database,
         kafka_factory=lambda _settings, _handler, _queue: kafka,
     )
 
     async with app.router.lifespan_context(app):
-        assert app.state.database is database
         assert app.state.kafka is kafka
         assert isinstance(app.state.payment_activity_queue, asyncio.Queue)
         assert isinstance(app.state.websocket_manager, WebSocketConnectionManager)
         assert app.state.websocket_worker is not None
-        assert calls == ["database.start", "kafka.start"]
+        assert calls == ["kafka.start"]
 
-    assert calls == ["database.start", "kafka.start", "kafka.stop", "database.stop"]
+    assert calls == ["kafka.start", "kafka.stop", "database.dispose"]
 
 
 @pytest.mark.asyncio
-async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
+async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     settings = make_settings()
-    database = FakeDatabase("database", calls)
     kafka = FailingKafka("kafka", calls)
+    monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
     app = create_app(
         settings_factory=lambda: settings,
-        database_factory=lambda _: database,
         kafka_factory=lambda _settings, _handler, _queue: kafka,
     )
 
@@ -116,7 +115,7 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
         async with app.router.lifespan_context(app):
             pass
 
-    assert calls == ["database.start", "kafka.start", "kafka.stop", "database.stop"]
+    assert calls == ["kafka.start", "kafka.stop", "database.dispose"]
 
 
 @pytest.mark.asyncio
