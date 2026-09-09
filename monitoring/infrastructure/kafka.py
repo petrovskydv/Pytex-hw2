@@ -9,10 +9,12 @@ from aiokafka import AIOKafkaConsumer
 
 from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings
+from monitoring.domain.dto import PaymentActivityAggregate
 
 logger = logging.getLogger(__name__)
 
-PurchaseBatchHandler = Callable[[list[TicketPurchasedEvent]], Awaitable[None]]
+PurchaseBatchHandler = Callable[[list[TicketPurchasedEvent]], Awaitable[list[PaymentActivityAggregate]]]
+PaymentActivityQueue = asyncio.Queue[list[PaymentActivityAggregate]]
 
 
 @dataclass(slots=True)
@@ -78,10 +80,12 @@ class MonitoringKafka:
         self,
         settings: KafkaSettings,
         batch_handler: PurchaseBatchHandler,
+        payment_activity_queue: PaymentActivityQueue,
         consumer_factory: Callable[..., Any] = AIOKafkaConsumer,
     ) -> None:
         self._settings = settings
         self._batch_handler = batch_handler
+        self._payment_activity_queue = payment_activity_queue
         self._consumer_factory = consumer_factory
         self._consumer: Any | None = None
         self._worker_task: asyncio.Task[None] | None = None
@@ -140,7 +144,7 @@ class MonitoringKafka:
                 continue
 
             try:
-                await self._batch_handler(batch.events)
+                aggregates = await self._batch_handler(batch.events)
             except Exception:
                 for partition, offset in batch.retry_offsets.items():
                     consumer.seek(partition, offset)
@@ -148,3 +152,4 @@ class MonitoringKafka:
                 continue
 
             await consumer.commit(batch.commit_offsets)
+            await self._payment_activity_queue.put(aggregates)

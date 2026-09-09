@@ -8,6 +8,7 @@ import pytest
 
 from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings
+from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.infrastructure.kafka import (
     MonitoringKafka,
     collect_purchase_batch,
@@ -22,12 +23,10 @@ class FakeBatchConsumer:
         *,
         wait_on_empty: bool = False,
         order: list[str] | None = None,
-        commit_event: asyncio.Event | None = None,
     ) -> None:
         self.responses = responses
         self.wait_on_empty = wait_on_empty
         self.order = order
-        self.commit_event = commit_event
         self.calls: list[dict[str, int]] = []
         self.commit_calls: list[dict[str, int]] = []
         self.seek_calls: list[tuple[str, int]] = []
@@ -61,8 +60,6 @@ class FakeBatchConsumer:
         self.commit_calls.append(offsets)
         if self.order is not None:
             self.order.append("kafka.commit")
-        if self.commit_event is not None:
-            self.commit_event.set()
 
     def seek(self, partition: str, offset: int) -> None:
         self.seek_calls.append((partition, offset))
@@ -80,24 +77,38 @@ class StaticConsumerFactory:
 
 
 class RecordingBatchHandler:
-    def __init__(self, order: list[str]) -> None:
+    def __init__(self, order: list[str], aggregates: list[PaymentActivityAggregate]) -> None:
         self.order = order
+        self.aggregates = aggregates
 
-    async def __call__(self, batch: list[TicketPurchasedEvent]) -> None:
+    async def __call__(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
         self.order.append("db.commit")
+        return self.aggregates
 
 
 class FailOnceBatchHandler:
-    def __init__(self, order: list[str]) -> None:
+    def __init__(self, order: list[str], aggregates: list[PaymentActivityAggregate]) -> None:
         self.order = order
+        self.aggregates = aggregates
         self.calls = 0
 
-    async def __call__(self, batch: list[TicketPurchasedEvent]) -> None:
+    async def __call__(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
         self.calls += 1
         if self.calls == 1:
             self.order.append("db.error")
             raise RuntimeError("database unavailable")
         self.order.append("db.commit")
+        return self.aggregates
+
+
+class RecordingPaymentActivityQueue(asyncio.Queue[list[PaymentActivityAggregate]]):
+    def __init__(self, order: list[str]) -> None:
+        super().__init__()
+        self.order = order
+
+    async def put(self, item: list[PaymentActivityAggregate]) -> None:
+        self.order.append("queue.put")
+        await super().put(item)
 
 
 def make_purchase_event(event_id: int) -> TicketPurchasedEvent:
@@ -107,6 +118,15 @@ def make_purchase_event(event_id: int) -> TicketPurchasedEvent:
         tickets_count=1,
         total_amount=1000,
         paid_at=datetime.now(UTC),
+    )
+
+
+def make_aggregate(event_id: int) -> PaymentActivityAggregate:
+    return PaymentActivityAggregate(
+        event_id=event_id,
+        payments_count=1,
+        tickets_count=1,
+        total_amount=1000,
     )
 
 
@@ -163,56 +183,54 @@ async def test_collect_purchase_batch_flushes_partial_batch_on_timeout() -> None
 
 
 @pytest.mark.asyncio
-async def test_monitoring_commits_offsets_after_batch_handler() -> None:
+async def test_monitoring_enqueues_aggregates_after_kafka_commit() -> None:
     order: list[str] = []
-    committed = asyncio.Event()
     events = [make_purchase_event(1), make_purchase_event(2)]
-    consumer = FakeBatchConsumer(
-        [make_records(events, start_offset=4)],
-        order=order,
-        commit_event=committed,
-    )
-    handler = RecordingBatchHandler(order)
+    aggregates = [make_aggregate(1), make_aggregate(2)]
+    consumer = FakeBatchConsumer([make_records(events, start_offset=4)], order=order)
+    handler = RecordingBatchHandler(order, aggregates)
+    queue = RecordingPaymentActivityQueue(order)
     connection = MonitoringKafka(
         KafkaSettings(max_records=2, batch_timeout_ms=30),
         batch_handler=handler,
+        payment_activity_queue=queue,
         consumer_factory=StaticConsumerFactory(consumer),
     )
 
     await connection.start()
     try:
-        await asyncio.wait_for(committed.wait(), timeout=1)
+        queued_aggregates = await asyncio.wait_for(queue.get(), timeout=1)
     finally:
         await connection.stop()
 
-    assert order[:2] == ["db.commit", "kafka.commit"]
+    assert queued_aggregates == aggregates
+    assert order[:3] == ["db.commit", "kafka.commit", "queue.put"]
     assert consumer.commit_calls == [{"partition-0": 6}]
 
 
 @pytest.mark.asyncio
-async def test_monitoring_does_not_commit_failed_batch_and_redelivers() -> None:
+async def test_monitoring_enqueues_only_after_retry_succeeds_and_commits() -> None:
     order: list[str] = []
-    committed = asyncio.Event()
     events = [make_purchase_event(1), make_purchase_event(1)]
-    consumer = FakeBatchConsumer(
-        [make_records(events, start_offset=8)],
-        order=order,
-        commit_event=committed,
-    )
-    handler = FailOnceBatchHandler(order)
+    aggregates = [make_aggregate(1)]
+    consumer = FakeBatchConsumer([make_records(events, start_offset=8)], order=order)
+    handler = FailOnceBatchHandler(order, aggregates)
+    queue = RecordingPaymentActivityQueue(order)
     connection = MonitoringKafka(
         KafkaSettings(max_records=2, batch_timeout_ms=30),
         batch_handler=handler,
+        payment_activity_queue=queue,
         consumer_factory=StaticConsumerFactory(consumer),
     )
 
     await connection.start()
     try:
-        await asyncio.wait_for(committed.wait(), timeout=1)
+        queued_aggregates = await asyncio.wait_for(queue.get(), timeout=1)
     finally:
         await connection.stop()
 
+    assert queued_aggregates == aggregates
     assert handler.calls == 2
-    assert order[:4] == ["db.error", "seek", "db.commit", "kafka.commit"]
+    assert order[:5] == ["db.error", "seek", "db.commit", "kafka.commit", "queue.put"]
     assert consumer.seek_calls == [("partition-0", 8)]
     assert consumer.commit_calls == [{"partition-0": 10}]

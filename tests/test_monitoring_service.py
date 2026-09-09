@@ -7,6 +7,7 @@ from starlette.routing import WebSocketRoute
 
 from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings
+from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.infrastructure.kafka import MonitoringKafka, deserialize_ticket_purchase
 from monitoring.main import create_app
 
@@ -61,8 +62,9 @@ class FakeConsumerFactory:
         return FakeConsumer(self.captured)
 
 
-async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> None:
+async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
     """Обработчик-заглушка для unit-тестов Kafka lifecycle."""
+    return []
 
 
 @pytest.mark.asyncio
@@ -78,12 +80,13 @@ async def test_monitoring_lifespan_owns_resources() -> None:
     app = create_app(
         settings_factory=lambda: settings,
         database_factory=lambda _: database,
-        kafka_factory=lambda _settings, _handler: kafka,
+        kafka_factory=lambda _settings, _handler, _queue: kafka,
     )
 
     async with app.router.lifespan_context(app):
         assert app.state.database is database
         assert app.state.kafka is kafka
+        assert isinstance(app.state.payment_activity_queue, asyncio.Queue)
         assert calls == ["database.start", "kafka.start"]
 
     assert calls == ["database.start", "kafka.start", "kafka.stop", "database.stop"]
@@ -101,7 +104,7 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error() -> None:
     app = create_app(
         settings_factory=lambda: settings,
         database_factory=lambda _: database,
-        kafka_factory=lambda _settings, _handler: kafka,
+        kafka_factory=lambda _settings, _handler, _queue: kafka,
     )
 
     with pytest.raises(RuntimeError, match="Kafka unavailable"):
@@ -117,6 +120,7 @@ async def test_kafka_connection_disables_auto_commit() -> None:
     connection = MonitoringKafka(
         KafkaSettings(),
         batch_handler=ignore_purchase_batch,
+        payment_activity_queue=asyncio.Queue(),
         consumer_factory=FakeConsumerFactory(captured),
     )
 
