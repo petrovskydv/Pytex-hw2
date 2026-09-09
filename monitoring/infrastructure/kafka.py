@@ -14,7 +14,6 @@ from monitoring.domain.dto import PaymentActivityAggregate
 logger = logging.getLogger(__name__)
 
 PurchaseBatchHandler = Callable[[list[TicketPurchasedEvent]], Awaitable[list[PaymentActivityAggregate]]]
-PaymentActivityQueue = asyncio.Queue[list[PaymentActivityAggregate]]
 
 
 @dataclass(slots=True)
@@ -80,7 +79,7 @@ class MonitoringKafka:
         self,
         settings: KafkaSettings,
         batch_handler: PurchaseBatchHandler,
-        payment_activity_queue: PaymentActivityQueue,
+        payment_activity_queue: asyncio.Queue[list[PaymentActivityAggregate]],
         consumer_factory: Callable[..., Any] = AIOKafkaConsumer,
     ) -> None:
         self._settings = settings

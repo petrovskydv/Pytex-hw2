@@ -10,8 +10,6 @@ from monitoring.domain.dto import PaymentActivityAggregate
 
 logger = logging.getLogger(__name__)
 
-PaymentActivityQueue = asyncio.Queue[list[PaymentActivityAggregate]]
-
 
 def build_payment_activity_message(aggregates: list[PaymentActivityAggregate]) -> dict[str, Any]:
     """Формирует WebSocket-сообщение об агрегированной активности оплат."""
@@ -97,7 +95,7 @@ class PaymentActivityWebSocketWorker:
 
     def __init__(
         self,
-        queue: PaymentActivityQueue,
+        queue: asyncio.Queue[list[PaymentActivityAggregate]],
         manager: WebSocketConnectionManager,
         send_timeout_seconds: float,
     ) -> None:

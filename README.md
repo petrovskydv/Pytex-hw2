@@ -58,8 +58,9 @@ Scheduler должен запускаться только в одном экз�
 Для событий о покупках используется Kafka в single-node KRaft-конфигурации. С хоста broker доступен как
 `localhost:9092`, из сервисов Docker Compose — как `kafka:19092`.
 
-Параметры потока недели 5 вынесены в секцию `KAFKA__*`: topic `tickets.purchased`, `linger_ms=75`, batch до 10
-сообщений с ожиданием не более 500 мс и WebSocket timeout 2 секунды.
+Параметры Kafka недели 5 вынесены в секцию `KAFKA__*`: topic `tickets.purchased`, `linger_ms=75`, batch до 10
+сообщений с ожиданием не более 500 мс. Таймаут WebSocket-отправки задаётся отдельно через
+`WEBSOCKET__SEND_TIMEOUT_SECONDS` и не может превышать 2 секунды.
 
 ### Генератор тестовых покупок
 
@@ -80,9 +81,11 @@ Scheduler должен запускаться только в одном экз�
 
 ### Сервис мониторинга покупок
 
-Monitoring — отдельное FastAPI-приложение с собственными подключениями к PostgreSQL и Kafka. В задаче 1
-подготовлен его lifecycle и WebSocket-ручка `WS /ws/payments`; обработка событий и рассылка будут добавляться
-в следующих задачах.
+Monitoring — отдельное FastAPI-приложение с собственными подключениями к PostgreSQL и Kafka. Оно получает
+`tickets.purchased` батчами до 10 сообщений или 500 мс, агрегирует покупки по `event_id` и сохраняет агрегаты
+одной транзакцией PostgreSQL. Kafka offsets подтверждаются только после успешного commit БД; затем агрегаты
+передаются через локальную `asyncio.Queue` отдельному WebSocket worker, который конкурентно рассылает их
+клиентам `WS /ws/payments` с таймаутом не более 2 секунд на клиента.
 
 `aiokafka` является общей runtime-зависимостью основного API и monitoring-сервиса и хранится в корневом
 `pyproject.toml`; отдельного `requirements.txt` для monitoring нет.

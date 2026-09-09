@@ -10,7 +10,6 @@ from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.infrastructure.kafka import MonitoringKafka, deserialize_ticket_purchase
-from monitoring.main import create_app
 from monitoring.services.websocket_delivery import WebSocketConnectionManager
 
 
@@ -83,13 +82,11 @@ async def test_monitoring_lifespan_owns_resources(monkeypatch: pytest.MonkeyPatc
     calls: list[str] = []
     settings = make_settings()
     kafka = FakeResource("kafka", calls)
+    monkeypatch.setattr(monitoring_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _handler, _queue: kafka)
     monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
 
-    app = create_app(
-        settings_factory=lambda: settings,
-        kafka_factory=lambda _settings, _handler, _queue: kafka,
-    )
-
+    app = monitoring_main.app
     async with app.router.lifespan_context(app):
         assert app.state.kafka is kafka
         assert isinstance(app.state.payment_activity_queue, asyncio.Queue)
@@ -105,12 +102,11 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch
     calls: list[str] = []
     settings = make_settings()
     kafka = FailingKafka("kafka", calls)
+    monkeypatch.setattr(monitoring_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _handler, _queue: kafka)
     monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
-    app = create_app(
-        settings_factory=lambda: settings,
-        kafka_factory=lambda _settings, _handler, _queue: kafka,
-    )
 
+    app = monitoring_main.app
     with pytest.raises(RuntimeError, match="Kafka unavailable"):
         async with app.router.lifespan_context(app):
             pass
@@ -144,6 +140,7 @@ async def test_kafka_connection_disables_auto_commit() -> None:
 
 
 def test_payments_websocket_route_is_registered() -> None:
-    app = create_app(settings_factory=make_settings)
-
-    assert any(isinstance(route, WebSocketRoute) and route.path == "/ws/payments" for route in app.routes)
+    assert any(
+        isinstance(route, WebSocketRoute) and route.path == "/ws/payments"
+        for route in monitoring_main.app.routes
+    )
