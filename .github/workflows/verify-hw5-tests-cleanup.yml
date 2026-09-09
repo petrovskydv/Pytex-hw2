@@ -1,0 +1,55 @@
+name: Verify HW5 test cleanup
+
+on:
+  push:
+    branches: [hw-5]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hw-5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+      - run: uv sync --python 3.13 --frozen
+      - run: cp .env.example .env
+      - run: uv run ruff check tests/test_purchase_events.py tests/test_monitoring_kafka.py tests/test_monitoring_processing.py tests/test_monitoring_websocket.py
+      - run: uv run ruff format --check tests/test_purchase_events.py tests/test_monitoring_kafka.py tests/test_monitoring_processing.py tests/test_monitoring_websocket.py
+      - run: uv run pytest tests/test_purchase_events.py tests/test_monitoring_kafka.py tests/test_monitoring_processing.py tests/test_monitoring_websocket.py
+      - run: uv run pytest
+      - run: docker compose config --quiet
+      - name: Start application stack
+        run: docker compose up -d --build db redis kafka payment-api protection-api migrate app monitoring
+      - name: Wait for services
+        run: |
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8000/openapi.json >/dev/null && curl --fail --silent http://127.0.0.1:8001/openapi.json >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps -a
+          docker compose logs app monitoring kafka migrate
+          exit 1
+      - name: Verify real WebSocket delivery
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          import json
+          import websockets
+
+          async def main() -> None:
+              async with websockets.connect("ws://127.0.0.1:8001/ws/payments") as websocket:
+                  payload = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
+              assert payload["type"] == "payment_activity"
+              assert payload["items"]
+              print("test cleanup e2e PASS")
+
+          asyncio.run(main())
+          PY
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
