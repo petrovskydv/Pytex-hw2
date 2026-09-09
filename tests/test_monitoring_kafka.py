@@ -6,25 +6,49 @@ from uuid import uuid4
 
 import pytest
 
+import monitoring.main as monitoring_main
 from app.domain.dto import TicketPurchasedEvent
-from monitoring.config import KafkaSettings
+from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.infrastructure.kafka import (
     MonitoringKafka,
     collect_purchase_batch,
     deserialize_ticket_purchase,
 )
+from monitoring.services.websocket_delivery import WebSocketConnectionManager
+
+
+class FakeKafka:
+    def __init__(self, calls: list[str], *, fail_start: bool = False) -> None:
+        self.calls = calls
+        self.fail_start = fail_start
+
+    async def start(self) -> None:
+        self.calls.append("kafka.start")
+        if self.fail_start:
+            raise RuntimeError("Kafka unavailable")
+
+    async def stop(self) -> None:
+        self.calls.append("kafka.stop")
+
+
+class FakeEngine:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def dispose(self) -> None:
+        self.calls.append("database.dispose")
 
 
 class FakeBatchConsumer:
     def __init__(
         self,
-        responses: list[dict[str, list[Any]]],
+        responses: list[dict[str, list[Any]]] | None = None,
         *,
         wait_on_empty: bool = False,
         order: list[str] | None = None,
     ) -> None:
-        self.responses = responses
+        self.responses = responses or []
         self.wait_on_empty = wait_on_empty
         self.order = order
         self.calls: list[dict[str, int]] = []
@@ -68,11 +92,15 @@ class FakeBatchConsumer:
             self.order.append("seek")
 
 
-class StaticConsumerFactory:
+class ConsumerFactory:
     def __init__(self, consumer: FakeBatchConsumer) -> None:
         self.consumer = consumer
+        self.args: tuple[Any, ...] = ()
+        self.kwargs: dict[str, Any] = {}
 
     def __call__(self, *args: Any, **kwargs: Any) -> FakeBatchConsumer:
+        self.args = args
+        self.kwargs = kwargs
         return self.consumer
 
 
@@ -111,6 +139,10 @@ class RecordingPaymentActivityQueue(asyncio.Queue[list[PaymentActivityAggregate]
         await super().put(item)
 
 
+def make_settings() -> SimpleNamespace:
+    return SimpleNamespace(kafka=KafkaSettings(), websocket=WebSocketSettings())
+
+
 def make_purchase_event(event_id: int) -> TicketPurchasedEvent:
     return TicketPurchasedEvent(
         payment_id=uuid4(),
@@ -141,12 +173,74 @@ def make_records(
     }
 
 
+async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
+    return []
+
+
+@pytest.mark.asyncio
+async def test_monitoring_lifespan_owns_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    kafka = FakeKafka(calls)
+    monkeypatch.setattr(monitoring_main, "get_settings", make_settings)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _handler, _queue: kafka)
+    monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
+
+    app = monitoring_main.app
+    async with app.router.lifespan_context(app):
+        assert app.state.kafka is kafka
+        assert isinstance(app.state.payment_activity_queue, asyncio.Queue)
+        assert isinstance(app.state.websocket_manager, WebSocketConnectionManager)
+        assert app.state.websocket_worker is not None
+        assert calls == ["kafka.start"]
+
+    assert calls == ["kafka.start", "kafka.stop", "database.dispose"]
+
+
+@pytest.mark.asyncio
+async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    kafka = FakeKafka(calls, fail_start=True)
+    monkeypatch.setattr(monitoring_main, "get_settings", make_settings)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _handler, _queue: kafka)
+    monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
+
+    app = monitoring_main.app
+    with pytest.raises(RuntimeError, match="Kafka unavailable"):
+        async with app.router.lifespan_context(app):
+            pass
+
+    assert calls == ["kafka.start", "kafka.stop", "database.dispose"]
+
+
+@pytest.mark.asyncio
+async def test_kafka_connection_disables_auto_commit() -> None:
+    consumer = FakeBatchConsumer()
+    factory = ConsumerFactory(consumer)
+    connection = MonitoringKafka(
+        KafkaSettings(),
+        batch_handler=ignore_purchase_batch,
+        payment_activity_queue=asyncio.Queue(),
+        consumer_factory=factory,
+    )
+
+    await connection.start()
+    await asyncio.sleep(0)
+    await connection.stop()
+
+    assert factory.args == ("tickets.purchased",)
+    assert factory.kwargs["bootstrap_servers"] == "localhost:9092"
+    assert factory.kwargs["group_id"] == "payment-monitor"
+    assert factory.kwargs["enable_auto_commit"] is False
+    assert factory.kwargs["value_deserializer"] is deserialize_ticket_purchase
+    assert consumer.calls[0]["max_records"] == 10
+    assert 0 < consumer.calls[0]["timeout_ms"] <= 500
+    assert consumer.started is True
+    assert consumer.stopped is True
+
+
 def test_deserialize_ticket_purchase() -> None:
     event = make_purchase_event(3)
-
-    result = deserialize_ticket_purchase(event.model_dump_json().encode())
-
-    assert result == event
+    assert deserialize_ticket_purchase(event.model_dump_json().encode()) == event
 
 
 @pytest.mark.asyncio
@@ -188,13 +282,12 @@ async def test_monitoring_enqueues_aggregates_after_kafka_commit() -> None:
     events = [make_purchase_event(1), make_purchase_event(2)]
     aggregates = [make_aggregate(1), make_aggregate(2)]
     consumer = FakeBatchConsumer([make_records(events, start_offset=4)], order=order)
-    handler = RecordingBatchHandler(order, aggregates)
     queue = RecordingPaymentActivityQueue(order)
     connection = MonitoringKafka(
         KafkaSettings(max_records=2, batch_timeout_ms=30),
-        batch_handler=handler,
+        batch_handler=RecordingBatchHandler(order, aggregates),
         payment_activity_queue=queue,
-        consumer_factory=StaticConsumerFactory(consumer),
+        consumer_factory=ConsumerFactory(consumer),
     )
 
     await connection.start()
@@ -220,7 +313,7 @@ async def test_monitoring_enqueues_only_after_retry_succeeds_and_commits() -> No
         KafkaSettings(max_records=2, batch_timeout_ms=30),
         batch_handler=handler,
         payment_activity_queue=queue,
-        consumer_factory=StaticConsumerFactory(consumer),
+        consumer_factory=ConsumerFactory(consumer),
     )
 
     await connection.start()

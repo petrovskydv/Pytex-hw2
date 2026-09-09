@@ -3,14 +3,15 @@ from typing import Any
 
 import pytest
 from pydantic import ValidationError
+from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocketState
 
+import monitoring.main as monitoring_main
 from monitoring.config import WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.services.websocket_delivery import (
     PaymentActivityWebSocketWorker,
     WebSocketConnectionManager,
-    build_payment_activity_message,
 )
 
 
@@ -50,27 +51,16 @@ def make_aggregate(event_id: int = 3) -> PaymentActivityAggregate:
     )
 
 
+def test_payments_websocket_route_is_registered() -> None:
+    assert any(
+        isinstance(route, WebSocketRoute) and route.path == "/ws/payments"
+        for route in monitoring_main.app.routes
+    )
+
+
 def test_websocket_timeout_cannot_exceed_two_seconds() -> None:
     with pytest.raises(ValidationError):
         WebSocketSettings(send_timeout_seconds=2.1)
-
-
-def test_build_payment_activity_message() -> None:
-    aggregate = make_aggregate()
-
-    message = build_payment_activity_message([aggregate])
-
-    assert message == {
-        "type": "payment_activity",
-        "items": [
-            {
-                "event_id": 3,
-                "payments_count": 2,
-                "tickets_count": 6,
-                "total_amount": 12000,
-            }
-        ],
-    }
 
 
 @pytest.mark.asyncio
@@ -132,3 +122,19 @@ async def test_websocket_worker_reads_queue_and_sends_saved_aggregates() -> None
             ],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_websocket_worker_drains_queue_before_shutdown() -> None:
+    queue: asyncio.Queue[list[PaymentActivityAggregate]] = asyncio.Queue()
+    manager = WebSocketConnectionManager()
+    client = FakeWebSocket(send_delay_seconds=0.02)
+    await manager.connect(client)
+    worker = PaymentActivityWebSocketWorker(queue, manager, send_timeout_seconds=0.05)
+    worker.start()
+
+    await queue.put([make_aggregate()])
+    await worker.stop()
+
+    assert queue.empty()
+    assert client.sent_messages
