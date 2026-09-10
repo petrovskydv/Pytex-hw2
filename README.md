@@ -19,7 +19,7 @@
 3. Запустите инфраструктуру:
 
    ```bash
-   docker compose up -d db payment-api protection-api redis kafka
+   docker compose up -d db payment-api protection-api redis kafka kafka-init kafka-ui
    ```
 
 4. Примените миграции:
@@ -57,6 +57,13 @@ Scheduler должен запускаться только в одном экз�
 
 Для событий о покупках используется Kafka в single-node KRaft-конфигурации. С хоста broker доступен как
 `localhost:9092`, из сервисов Docker Compose — как `kafka:19092`.
+
+Одноразовый сервис `kafka-init` создаёт topic `tickets.purchased` до запуска producer и consumer. Topic создаётся
+с двумя partitions и replication factor 1. `app` и `monitoring` стартуют только после успешного завершения
+`kafka-init`.
+
+Kafka UI доступен по адресу http://localhost:8080. Он подключён к локальному кластеру `afisha-local` через
+`kafka:19092` и позволяет смотреть topics, partitions, сообщения и consumer groups.
 
 Параметры Kafka недели 5 вынесены в секцию `KAFKA__*`: topic `tickets.purchased`, `linger_ms=75`, batch до 10
 сообщений с ожиданием не более 500 мс. Таймаут WebSocket-отправки задаётся отдельно через
@@ -98,7 +105,7 @@ Monitoring — отдельное FastAPI-приложение с собстве
 uv run uvicorn monitoring.main:app --host 127.0.0.1 --port 8001
 ```
 
-Весь стек вместе с миграцией, API, monitoring, workers, scheduler и Kafka можно запустить одной командой:
+Весь стек вместе с миграцией, API, monitoring, workers, scheduler, Kafka и Kafka UI можно запустить одной командой:
 
 ```bash
 docker compose up --build
@@ -139,6 +146,7 @@ uv run pre-commit run --all-files
 | PostgreSQL | `localhost:7432` |
 | Redis | `localhost:7379` |
 | Kafka | `localhost:9092` |
+| Kafka UI | http://localhost:8080 |
 | Payment API | http://localhost:9001 |
 | Protection API | http://localhost:9002 |
 | FastAPI | http://localhost:8000 |
