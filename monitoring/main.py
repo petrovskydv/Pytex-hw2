@@ -51,13 +51,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.websocket_worker = websocket_worker
         yield
     finally:
-        try:
-            await kafka_broker.stop()
-        finally:
-            try:
-                await websocket_worker.stop()
-            finally:
-                await engine.dispose()
+        await kafka_broker.stop()
+        await websocket_worker.stop()
+        await engine.dispose()
 
 
 app = FastAPI(title="Afisha Purchase Monitoring", lifespan=lifespan)
