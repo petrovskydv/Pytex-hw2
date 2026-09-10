@@ -7,8 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain.dto import TicketPurchasedEvent
-from monitoring.domain.dto import PaymentActivityAggregate
+from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
 from monitoring.infrastructure.database.models import EventPaymentActivity
 from monitoring.infrastructure.database.repositories.payment_activity import PaymentActivityRepository
 from monitoring.services.purchase_batches import aggregate_purchase_batch, process_purchase_batch
