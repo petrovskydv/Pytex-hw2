@@ -2,8 +2,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
-from app.domain.dto import TicketPurchasedEvent
-from monitoring.domain.dto import PaymentActivityAggregate
+from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
 
 logger = logging.getLogger(__name__)
 
