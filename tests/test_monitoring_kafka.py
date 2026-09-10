@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from faststream import AckPolicy
 
+import monitoring.infrastructure.kafka as monitoring_kafka_module
 import monitoring.main as monitoring_main
 from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
@@ -86,21 +87,21 @@ class FakeMessage:
         self.order.append("kafka.nack")
 
 
-class RecordingBatchHandler:
+class RecordingBatchProcessor:
     def __init__(self, order: list[str], aggregates: list[PaymentActivityAggregate]) -> None:
         self.order = order
         self.aggregates = aggregates
 
-    async def __call__(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
+    async def process(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
         self.order.append("db.commit")
         return self.aggregates
 
 
-class FailingBatchHandler:
+class FailingBatchProcessor:
     def __init__(self, order: list[str]) -> None:
         self.order = order
 
-    async def __call__(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
+    async def process(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
         self.order.append("db.error")
         raise RuntimeError("database unavailable")
 
@@ -143,7 +144,7 @@ async def test_monitoring_lifespan_owns_resources(monkeypatch: pytest.MonkeyPatc
     calls: list[str] = []
     kafka = FakeKafka(calls)
     monkeypatch.setattr(monitoring_main, "get_settings", make_settings)
-    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _handler, _queue: kafka)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _processor, _queue: kafka)
     monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
 
     app = monitoring_main.app
@@ -162,7 +163,7 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch
     calls: list[str] = []
     kafka = FakeKafka(calls, fail_start=True)
     monkeypatch.setattr(monitoring_main, "get_settings", make_settings)
-    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _handler, _queue: kafka)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _processor, _queue: kafka)
     monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
 
     app = monitoring_main.app
@@ -174,13 +175,13 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_faststream_subscriber_uses_required_batch_and_ack_settings() -> None:
+async def test_faststream_subscriber_uses_required_batch_and_ack_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(monitoring_kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
     connection = MonitoringKafka(
         KafkaSettings(),
-        batch_handler=RecordingBatchHandler([], []),
+        processor=RecordingBatchProcessor([], []),
         payment_activity_queue=asyncio.Queue(),
-        broker_factory=FakeBrokerFactory(captured),
     )
 
     await connection.start()
@@ -203,16 +204,16 @@ async def test_faststream_subscriber_uses_required_batch_and_ack_settings() -> N
 
 
 @pytest.mark.asyncio
-async def test_monitoring_acks_and_enqueues_only_after_database_commit() -> None:
+async def test_monitoring_acks_and_enqueues_only_after_database_commit(monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
     aggregates = [make_aggregate(1), make_aggregate(2)]
     queue = RecordingPaymentActivityQueue(order)
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(monitoring_kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
     MonitoringKafka(
         KafkaSettings(),
-        batch_handler=RecordingBatchHandler(order, aggregates),
+        processor=RecordingBatchProcessor(order, aggregates),
         payment_activity_queue=queue,
-        broker_factory=FakeBrokerFactory(captured),
     )
     message = FakeMessage(order)
 
@@ -225,15 +226,15 @@ async def test_monitoring_acks_and_enqueues_only_after_database_commit() -> None
 
 
 @pytest.mark.asyncio
-async def test_monitoring_nacks_without_enqueuing_after_database_error() -> None:
+async def test_monitoring_nacks_without_enqueuing_after_database_error(monkeypatch: pytest.MonkeyPatch) -> None:
     order: list[str] = []
     queue = RecordingPaymentActivityQueue(order)
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(monitoring_kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
     MonitoringKafka(
         KafkaSettings(),
-        batch_handler=FailingBatchHandler(order),
+        processor=FailingBatchProcessor(order),
         payment_activity_queue=queue,
-        broker_factory=FakeBrokerFactory(captured),
     )
     message = FakeMessage(order)
 
