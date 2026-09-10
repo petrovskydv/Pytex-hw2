@@ -1,6 +1,5 @@
 import asyncio
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID
 
 import pytest
@@ -8,6 +7,7 @@ import pytest
 from app.domain.dto import TicketPurchasedEvent
 from app.infrastructure.kafka import KafkaPurchasePublisher
 from app.services.purchase_generator import PurchaseEventGenerator
+from tests.fakes import FakePublisherBroker
 
 
 class EventCollector:
@@ -25,22 +25,6 @@ class EventCollector:
 class NullPublisher:
     async def publish(self, _: TicketPurchasedEvent) -> None:
         return None
-
-
-class FakeBroker:
-    def __init__(self, captured: dict[str, Any]) -> None:
-        self.captured = captured
-
-    async def publish(
-        self,
-        message: TicketPurchasedEvent,
-        *,
-        topic: str,
-        key: bytes,
-        no_confirm: bool,
-    ) -> object:
-        self.captured.setdefault("messages", []).append((topic, message, key, no_confirm))
-        return object()
 
 
 def build_event() -> TicketPurchasedEvent:
@@ -98,11 +82,10 @@ async def test_purchase_generator_runs_in_background_and_stops() -> None:
 @pytest.mark.asyncio
 async def test_publisher_uses_injected_broker_and_event_id_key() -> None:
     """Проверяет публикацию через переданный broker в нужный topic с Kafka key из event_id."""
-    captured: dict[str, Any] = {}
-    broker = FakeBroker(captured)
+    broker = FakePublisherBroker()
     publisher = KafkaPurchasePublisher(broker, "tickets.purchased")
     event = build_event()
 
     await publisher.publish(event)
 
-    assert captured["messages"] == [("tickets.purchased", event, b"3", True)]
+    assert broker.messages == [("tickets.purchased", event, b"3", True)]
