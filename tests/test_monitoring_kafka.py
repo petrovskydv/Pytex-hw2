@@ -5,15 +5,12 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from faststream import AckPolicy
 
 import monitoring.main as monitoring_main
 from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
-from monitoring.infrastructure.kafka import (
-    MonitoringKafka,
-    collect_purchase_batch,
-    deserialize_ticket_purchase,
-)
+from monitoring.infrastructure.kafka import MonitoringKafka
 from monitoring.services.websocket_delivery import WebSocketConnectionManager
 
 
@@ -39,68 +36,54 @@ class FakeEngine:
         self.calls.append("database.dispose")
 
 
-class FakeBatchConsumer:
-    def __init__(
-        self,
-        responses: list[dict[str, list[Any]]] | None = None,
-        *,
-        wait_on_empty: bool = False,
-        order: list[str] | None = None,
-    ) -> None:
-        self.responses = responses or []
-        self.wait_on_empty = wait_on_empty
-        self.order = order
-        self.calls: list[dict[str, int]] = []
-        self.commit_calls: list[dict[str, int]] = []
-        self.seek_calls: list[tuple[str, int]] = []
-        self.last_response: dict[str, list[Any]] | None = None
-        self.redeliver = False
-        self.started = False
-        self.stopped = False
+class FakeSubscriber:
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self.captured = captured
+
+    def __call__(self, handler: Any) -> Any:
+        self.captured["handler"] = handler
+        return handler
+
+
+class FakeBroker:
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self.captured = captured
+
+    def subscriber(self, *args: Any, **kwargs: Any) -> FakeSubscriber:
+        self.captured["subscriber_args"] = args
+        self.captured["subscriber_kwargs"] = kwargs
+        return FakeSubscriber(self.captured)
 
     async def start(self) -> None:
-        self.started = True
+        self.captured["started"] = True
 
     async def stop(self) -> None:
-        self.stopped = True
-
-    async def getmany(self, *, timeout_ms: int, max_records: int) -> dict[str, list[Any]]:
-        self.calls.append({"timeout_ms": timeout_ms, "max_records": max_records})
-        if self.redeliver and self.last_response is not None:
-            self.redeliver = False
-            return self.last_response
-        if self.responses:
-            response = self.responses.pop(0)
-            if response:
-                self.last_response = response
-            if not response and self.wait_on_empty:
-                await asyncio.sleep(timeout_ms / 1000)
-            return response
-        await asyncio.Event().wait()
-        return {}
-
-    async def commit(self, offsets: dict[str, int]) -> None:
-        self.commit_calls.append(offsets)
-        if self.order is not None:
-            self.order.append("kafka.commit")
-
-    def seek(self, partition: str, offset: int) -> None:
-        self.seek_calls.append((partition, offset))
-        self.redeliver = True
-        if self.order is not None:
-            self.order.append("seek")
+        self.captured["stopped"] = True
 
 
-class ConsumerFactory:
-    def __init__(self, consumer: FakeBatchConsumer) -> None:
-        self.consumer = consumer
-        self.args: tuple[Any, ...] = ()
-        self.kwargs: dict[str, Any] = {}
+class FakeBrokerFactory:
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self.captured = captured
 
-    def __call__(self, *args: Any, **kwargs: Any) -> FakeBatchConsumer:
-        self.args = args
-        self.kwargs = kwargs
-        return self.consumer
+    def __call__(self, *args: Any, **kwargs: Any) -> FakeBroker:
+        self.captured["broker_args"] = args
+        self.captured["broker_kwargs"] = kwargs
+        return FakeBroker(self.captured)
+
+
+class FakeMessage:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+        self.ack_calls = 0
+        self.nack_calls = 0
+
+    async def ack(self) -> None:
+        self.ack_calls += 1
+        self.order.append("kafka.ack")
+
+    async def nack(self) -> None:
+        self.nack_calls += 1
+        self.order.append("kafka.nack")
 
 
 class RecordingBatchHandler:
@@ -113,19 +96,13 @@ class RecordingBatchHandler:
         return self.aggregates
 
 
-class FailOnceBatchHandler:
-    def __init__(self, order: list[str], aggregates: list[PaymentActivityAggregate]) -> None:
+class FailingBatchHandler:
+    def __init__(self, order: list[str]) -> None:
         self.order = order
-        self.aggregates = aggregates
-        self.calls = 0
 
     async def __call__(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
-        self.calls += 1
-        if self.calls == 1:
-            self.order.append("db.error")
-            raise RuntimeError("database unavailable")
-        self.order.append("db.commit")
-        return self.aggregates
+        self.order.append("db.error")
+        raise RuntimeError("database unavailable")
 
 
 class RecordingPaymentActivityQueue(asyncio.Queue[list[PaymentActivityAggregate]]):
@@ -159,21 +136,6 @@ def make_aggregate(event_id: int) -> PaymentActivityAggregate:
         tickets_count=1,
         total_amount=1000,
     )
-
-
-def make_records(
-    events: list[TicketPurchasedEvent],
-    *,
-    start_offset: int = 0,
-    partition: str = "partition-0",
-) -> dict[str, list[Any]]:
-    return {
-        partition: [SimpleNamespace(value=event, offset=start_offset + index) for index, event in enumerate(events)]
-    }
-
-
-async def ignore_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
-    return []
 
 
 @pytest.mark.asyncio
@@ -212,117 +174,72 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_kafka_connection_disables_auto_commit() -> None:
-    consumer = FakeBatchConsumer()
-    factory = ConsumerFactory(consumer)
+async def test_faststream_subscriber_uses_required_batch_and_ack_settings() -> None:
+    captured: dict[str, Any] = {}
     connection = MonitoringKafka(
         KafkaSettings(),
-        batch_handler=ignore_purchase_batch,
+        batch_handler=RecordingBatchHandler([], []),
         payment_activity_queue=asyncio.Queue(),
-        consumer_factory=factory,
+        broker_factory=FakeBrokerFactory(captured),
     )
 
     await connection.start()
-    await asyncio.sleep(0)
     await connection.stop()
 
-    assert factory.args == ("tickets.purchased",)
-    assert factory.kwargs["bootstrap_servers"] == "localhost:9092"
-    assert factory.kwargs["group_id"] == "payment-monitor"
-    assert factory.kwargs["enable_auto_commit"] is False
-    assert factory.kwargs["value_deserializer"] is deserialize_ticket_purchase
-    assert consumer.calls[0]["max_records"] == 10
-    assert 0 < consumer.calls[0]["timeout_ms"] <= 500
-    assert consumer.started is True
-    assert consumer.stopped is True
-
-
-def test_deserialize_ticket_purchase() -> None:
-    event = make_purchase_event(3)
-    assert deserialize_ticket_purchase(event.model_dump_json().encode()) == event
-
-
-@pytest.mark.asyncio
-async def test_collect_purchase_batch_returns_immediately_after_ten_records() -> None:
-    events = [make_purchase_event(index) for index in range(1, 11)]
-    consumer = FakeBatchConsumer([make_records(events)])
-
-    batch = await collect_purchase_batch(consumer, max_records=10, batch_timeout_ms=500)
-
-    assert batch.events == events
-    assert batch.retry_offsets == {"partition-0": 0}
-    assert batch.commit_offsets == {"partition-0": 10}
-    assert len(consumer.calls) == 1
-    assert consumer.calls[0]["max_records"] == 10
-    assert 0 < consumer.calls[0]["timeout_ms"] <= 500
+    assert captured["broker_args"] == ("localhost:9092",)
+    assert captured["broker_kwargs"] == {"consumer_only": True}
+    assert captured["subscriber_args"] == ("tickets.purchased",)
+    assert captured["subscriber_kwargs"] == {
+        "group_id": "payment-monitor",
+        "batch": True,
+        "max_records": 10,
+        "batch_timeout_ms": 500,
+        "auto_offset_reset": "earliest",
+        "ack_policy": AckPolicy.MANUAL,
+    }
+    assert captured["handler"] == connection._handle_batch
+    assert captured["started"] is True
+    assert captured["stopped"] is True
 
 
 @pytest.mark.asyncio
-async def test_collect_purchase_batch_flushes_partial_batch_on_timeout() -> None:
-    events = [make_purchase_event(index) for index in range(1, 7)]
-    consumer = FakeBatchConsumer([make_records(events), {}], wait_on_empty=True)
-    loop = asyncio.get_running_loop()
-    started_at = loop.time()
-
-    batch = await collect_purchase_batch(consumer, max_records=10, batch_timeout_ms=30)
-
-    elapsed = loop.time() - started_at
-    assert batch.events == events
-    assert batch.retry_offsets == {"partition-0": 0}
-    assert batch.commit_offsets == {"partition-0": 6}
-    assert consumer.calls[0]["max_records"] == 10
-    assert consumer.calls[1]["max_records"] == 4
-    assert 0.02 <= elapsed < 0.2
-
-
-@pytest.mark.asyncio
-async def test_monitoring_enqueues_aggregates_after_kafka_commit() -> None:
+async def test_monitoring_acks_and_enqueues_only_after_database_commit() -> None:
     order: list[str] = []
-    events = [make_purchase_event(1), make_purchase_event(2)]
     aggregates = [make_aggregate(1), make_aggregate(2)]
-    consumer = FakeBatchConsumer([make_records(events, start_offset=4)], order=order)
     queue = RecordingPaymentActivityQueue(order)
-    connection = MonitoringKafka(
-        KafkaSettings(max_records=2, batch_timeout_ms=30),
+    captured: dict[str, Any] = {}
+    MonitoringKafka(
+        KafkaSettings(),
         batch_handler=RecordingBatchHandler(order, aggregates),
         payment_activity_queue=queue,
-        consumer_factory=ConsumerFactory(consumer),
+        broker_factory=FakeBrokerFactory(captured),
     )
+    message = FakeMessage(order)
 
-    await connection.start()
-    try:
-        queued_aggregates = await asyncio.wait_for(queue.get(), timeout=1)
-    finally:
-        await connection.stop()
+    await captured["handler"]([make_purchase_event(1), make_purchase_event(2)], message)
 
-    assert queued_aggregates == aggregates
-    assert order[:3] == ["db.commit", "kafka.commit", "queue.put"]
-    assert consumer.commit_calls == [{"partition-0": 6}]
+    assert order == ["db.commit", "kafka.ack", "queue.put"]
+    assert message.ack_calls == 1
+    assert message.nack_calls == 0
+    assert queue.get_nowait() == aggregates
 
 
 @pytest.mark.asyncio
-async def test_monitoring_enqueues_only_after_retry_succeeds_and_commits() -> None:
+async def test_monitoring_nacks_without_enqueuing_after_database_error() -> None:
     order: list[str] = []
-    events = [make_purchase_event(1), make_purchase_event(1)]
-    aggregates = [make_aggregate(1)]
-    consumer = FakeBatchConsumer([make_records(events, start_offset=8)], order=order)
-    handler = FailOnceBatchHandler(order, aggregates)
     queue = RecordingPaymentActivityQueue(order)
-    connection = MonitoringKafka(
-        KafkaSettings(max_records=2, batch_timeout_ms=30),
-        batch_handler=handler,
+    captured: dict[str, Any] = {}
+    MonitoringKafka(
+        KafkaSettings(),
+        batch_handler=FailingBatchHandler(order),
         payment_activity_queue=queue,
-        consumer_factory=ConsumerFactory(consumer),
+        broker_factory=FakeBrokerFactory(captured),
     )
+    message = FakeMessage(order)
 
-    await connection.start()
-    try:
-        queued_aggregates = await asyncio.wait_for(queue.get(), timeout=1)
-    finally:
-        await connection.stop()
+    await captured["handler"]([make_purchase_event(1)], message)
 
-    assert queued_aggregates == aggregates
-    assert handler.calls == 2
-    assert order[:5] == ["db.error", "seek", "db.commit", "kafka.commit", "queue.put"]
-    assert consumer.seek_calls == [("partition-0", 8)]
-    assert consumer.commit_calls == [{"partition-0": 10}]
+    assert order == ["db.error", "kafka.nack"]
+    assert message.ack_calls == 0
+    assert message.nack_calls == 1
+    assert queue.empty()
