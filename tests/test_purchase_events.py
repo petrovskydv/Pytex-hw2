@@ -1,5 +1,4 @@
 import asyncio
-import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -24,35 +23,39 @@ class EventCollector:
             self.ready.set()
 
 
-class FakeProducer:
-    def __init__(self, captured: dict[str, Any]) -> None:
+class FakeBroker:
+    def __init__(self, captured: dict[str, Any], *, fail_start: bool = False) -> None:
         self.captured = captured
+        self.fail_start = fail_start
 
     async def start(self) -> None:
         self.captured["started"] = True
+        if self.fail_start:
+            raise RuntimeError("Kafka unavailable")
 
     async def stop(self) -> None:
         self.captured["stopped"] = True
 
-    async def send(self, topic: str, value: bytes) -> object:
-        self.captured.setdefault("messages", []).append((topic, value))
+    async def publish(
+        self,
+        message: TicketPurchasedEvent,
+        *,
+        topic: str,
+        no_confirm: bool,
+    ) -> object:
+        self.captured.setdefault("messages", []).append((topic, message, no_confirm))
         return object()
 
 
-class FailingProducer(FakeProducer):
-    async def start(self) -> None:
-        self.captured["started"] = True
-        raise RuntimeError("Kafka unavailable")
-
-
-class FakeProducerFactory:
-    def __init__(self, captured: dict[str, Any], producer_type: type[FakeProducer] = FakeProducer) -> None:
+class FakeBrokerFactory:
+    def __init__(self, captured: dict[str, Any], *, fail_start: bool = False) -> None:
         self.captured = captured
-        self.producer_type = producer_type
+        self.fail_start = fail_start
 
-    def __call__(self, **kwargs: Any) -> FakeProducer:
+    def __call__(self, *args: Any, **kwargs: Any) -> FakeBroker:
+        self.captured["args"] = args
         self.captured["kwargs"] = kwargs
-        return self.producer_type(self.captured)
+        return FakeBroker(self.captured, fail_start=self.fail_start)
 
 
 async def discard_event(_: TicketPurchasedEvent) -> None:
@@ -113,25 +116,18 @@ async def test_purchase_generator_runs_in_background_and_stops() -> None:
 async def test_publisher_configures_linger_and_publishes_event() -> None:
     captured: dict[str, Any] = {}
     settings = KafkaSettings(bootstrap_servers="kafka:19092", topic="tickets.purchased", linger_ms=75)
-    publisher = KafkaPurchasePublisher(settings, producer_factory=FakeProducerFactory(captured))
+    publisher = KafkaPurchasePublisher(settings, broker_factory=FakeBrokerFactory(captured))
+    event = build_event()
 
     await publisher.start()
-    await publisher.publish(build_event())
+    await publisher.publish(event)
     await publisher.stop()
 
-    assert captured["kwargs"] == {"bootstrap_servers": "kafka:19092", "linger_ms": 75}
+    assert captured["args"] == ("kafka:19092",)
+    assert captured["kwargs"] == {"linger_ms": 75}
     assert captured["started"] is True
     assert captured["stopped"] is True
-
-    [(topic, raw_value)] = captured["messages"]
-    assert topic == "tickets.purchased"
-    assert json.loads(raw_value) == {
-        "payment_id": "12345678-1234-5678-1234-567812345678",
-        "event_id": 3,
-        "tickets_count": 2,
-        "total_amount": 4000,
-        "paid_at": "2026-09-07T12:00:00Z",
-    }
+    assert captured["messages"] == [("tickets.purchased", event, True)]
 
 
 @pytest.mark.asyncio
@@ -139,7 +135,7 @@ async def test_publisher_cleans_up_after_start_error() -> None:
     captured: dict[str, Any] = {}
     publisher = KafkaPurchasePublisher(
         KafkaSettings(),
-        producer_factory=FakeProducerFactory(captured, FailingProducer),
+        broker_factory=FakeBrokerFactory(captured, fail_start=True),
     )
 
     with pytest.raises(RuntimeError, match="Kafka unavailable"):
@@ -152,7 +148,7 @@ async def test_publisher_cleans_up_after_start_error() -> None:
 
 @pytest.mark.asyncio
 async def test_publisher_rejects_publish_before_start() -> None:
-    publisher = KafkaPurchasePublisher(KafkaSettings(), producer_factory=FakeProducerFactory({}))
+    publisher = KafkaPurchasePublisher(KafkaSettings(), broker_factory=FakeBrokerFactory({}))
 
     with pytest.raises(RuntimeError, match="producer не запущен"):
         await publisher.publish(build_event())
