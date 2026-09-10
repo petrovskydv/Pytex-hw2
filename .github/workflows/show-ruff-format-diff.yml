@@ -1,0 +1,22 @@
+name: Show Ruff format diff
+
+on:
+  push:
+    branches: [hw-5]
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hw-5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+      - run: uv sync --python 3.13 --frozen
+      - name: Show formatter diff
+        run: |
+          cp migrations/versions/0001_create_tables.py /tmp/before.py
+          uv run ruff format migrations/versions/0001_create_tables.py
+          diff -u /tmp/before.py migrations/versions/0001_create_tables.py || true
