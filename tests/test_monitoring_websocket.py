@@ -52,18 +52,21 @@ def make_aggregate(event_id: int = 3) -> PaymentActivityAggregate:
 
 
 def test_payments_websocket_route_is_registered() -> None:
+    """Проверяет регистрацию обязательного WebSocket endpoint /ws/payments."""
     assert any(
         isinstance(route, WebSocketRoute) and route.path == "/ws/payments" for route in monitoring_main.app.routes
     )
 
 
 def test_websocket_timeout_cannot_exceed_two_seconds() -> None:
+    """Проверяет ограничение настройки: таймаут отправки клиенту не может быть больше двух секунд."""
     with pytest.raises(ValidationError):
         WebSocketSettings(send_timeout_seconds=2.1)
 
 
 @pytest.mark.asyncio
 async def test_broadcast_sends_to_clients_concurrently_and_keeps_timeout_client() -> None:
+    """Проверяет конкурентную рассылку и сохранение клиента в списке после таймаута отправки."""
     manager = WebSocketConnectionManager()
     slow = FakeWebSocket(send_delay_seconds=0.2)
     fast = FakeWebSocket()
@@ -82,6 +85,7 @@ async def test_broadcast_sends_to_clients_concurrently_and_keeps_timeout_client(
 
 @pytest.mark.asyncio
 async def test_broadcast_removes_client_with_closed_connection_error() -> None:
+    """Проверяет удаление клиента только после ошибки, когда WebSocket уже находится в состоянии DISCONNECTED."""
     manager = WebSocketConnectionManager()
     closed = FakeWebSocket(send_error=RuntimeError("closed"))
     await manager.connect(closed)
@@ -94,6 +98,7 @@ async def test_broadcast_removes_client_with_closed_connection_error() -> None:
 
 @pytest.mark.asyncio
 async def test_websocket_worker_reads_queue_and_sends_saved_aggregates() -> None:
+    """Проверяет чтение сохранённых агрегатов из asyncio.Queue и отправку требуемого WebSocket payload."""
     queue: asyncio.Queue[list[PaymentActivityAggregate]] = asyncio.Queue()
     manager = WebSocketConnectionManager()
     client = FakeWebSocket()
@@ -125,6 +130,7 @@ async def test_websocket_worker_reads_queue_and_sends_saved_aggregates() -> None
 
 @pytest.mark.asyncio
 async def test_websocket_worker_drains_queue_before_shutdown() -> None:
+    """Проверяет graceful shutdown: worker отправляет остаток asyncio.Queue перед остановкой."""
     queue: asyncio.Queue[list[PaymentActivityAggregate]] = asyncio.Queue()
     manager = WebSocketConnectionManager()
     client = FakeWebSocket(send_delay_seconds=0.02)
