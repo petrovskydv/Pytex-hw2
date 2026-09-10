@@ -41,9 +41,10 @@ class FakeBroker:
         message: TicketPurchasedEvent,
         *,
         topic: str,
+        key: bytes,
         no_confirm: bool,
     ) -> object:
-        self.captured.setdefault("messages", []).append((topic, message, no_confirm))
+        self.captured.setdefault("messages", []).append((topic, message, key, no_confirm))
         return object()
 
 
@@ -113,7 +114,7 @@ async def test_purchase_generator_runs_in_background_and_stops() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publisher_configures_linger_and_publishes_event() -> None:
+async def test_publisher_configures_linger_and_partitions_by_event_id() -> None:
     captured: dict[str, Any] = {}
     settings = KafkaSettings(bootstrap_servers="kafka:19092", topic="tickets.purchased", linger_ms=75)
     publisher = KafkaPurchasePublisher(settings, broker_factory=FakeBrokerFactory(captured))
@@ -127,7 +128,7 @@ async def test_publisher_configures_linger_and_publishes_event() -> None:
     assert captured["kwargs"] == {"linger_ms": 75}
     assert captured["started"] is True
     assert captured["stopped"] is True
-    assert captured["messages"] == [("tickets.purchased", event, True)]
+    assert captured["messages"] == [("tickets.purchased", event, b"3", True)]
 
 
 @pytest.mark.asyncio
