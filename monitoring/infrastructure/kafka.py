@@ -12,21 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 class MonitoringKafka:
-    """Получает Kafka-события батчами через FastStream."""
+    """Настраивает обработчик Kafka-батчей сервиса мониторинга."""
 
     def __init__(
         self,
+        broker: KafkaBroker,
         settings: KafkaSettings,
         processor: PurchaseBatchProcessor,
         payment_activity_queue: asyncio.Queue[list[PaymentActivityAggregate]],
     ) -> None:
         self._processor = processor
         self._payment_activity_queue = payment_activity_queue
-        self._broker = KafkaBroker(
-            settings.bootstrap_servers,
-            consumer_only=True,
-        )
-        subscriber = self._broker.subscriber(
+
+        subscriber = broker.subscriber(
             settings.topic,
             group_id=settings.consumer_group,
             batch=True,
@@ -36,14 +34,6 @@ class MonitoringKafka:
             ack_policy=AckPolicy.MANUAL,
         )
         subscriber(self._handle_batch)
-
-    async def start(self) -> None:
-        """Подключает broker и запускает FastStream subscriber."""
-        await self._broker.start()
-
-    async def stop(self) -> None:
-        """Останавливает subscriber и закрывает broker."""
-        await self._broker.stop()
 
     async def _handle_batch(
         self,
