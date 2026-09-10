@@ -5,8 +5,6 @@ from uuid import UUID
 
 import pytest
 
-import app.infrastructure.kafka as kafka_module
-from app.config import KafkaSettings
 from app.domain.dto import TicketPurchasedEvent
 from app.infrastructure.kafka import KafkaPurchasePublisher
 from app.services.purchase_generator import PurchaseEventGenerator
@@ -30,17 +28,8 @@ class NullPublisher:
 
 
 class FakeBroker:
-    def __init__(self, captured: dict[str, Any], *, fail_start: bool = False) -> None:
+    def __init__(self, captured: dict[str, Any]) -> None:
         self.captured = captured
-        self.fail_start = fail_start
-
-    async def start(self) -> None:
-        self.captured["started"] = True
-        if self.fail_start:
-            raise RuntimeError("Kafka unavailable")
-
-    async def stop(self) -> None:
-        self.captured["stopped"] = True
 
     async def publish(
         self,
@@ -52,17 +41,6 @@ class FakeBroker:
     ) -> object:
         self.captured.setdefault("messages", []).append((topic, message, key, no_confirm))
         return object()
-
-
-class FakeBrokerFactory:
-    def __init__(self, captured: dict[str, Any], *, fail_start: bool = False) -> None:
-        self.captured = captured
-        self.fail_start = fail_start
-
-    def __call__(self, *args: Any, **kwargs: Any) -> FakeBroker:
-        self.captured["args"] = args
-        self.captured["kwargs"] = kwargs
-        return FakeBroker(self.captured, fail_start=self.fail_start)
 
 
 def build_event() -> TicketPurchasedEvent:
@@ -116,41 +94,12 @@ async def test_purchase_generator_runs_in_background_and_stops() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publisher_configures_linger_and_publishes_event(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publisher_uses_injected_broker_and_event_id_key() -> None:
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
-    settings = KafkaSettings(bootstrap_servers="kafka:19092", topic="tickets.purchased", linger_ms=75)
-    publisher = KafkaPurchasePublisher(settings)
+    broker = FakeBroker(captured)
+    publisher = KafkaPurchasePublisher(broker, "tickets.purchased")
     event = build_event()
 
-    await publisher.start()
     await publisher.publish(event)
-    await publisher.stop()
 
-    assert captured["args"] == ("kafka:19092",)
-    assert captured["kwargs"] == {"linger_ms": 75}
-    assert captured["started"] is True
-    assert captured["stopped"] is True
     assert captured["messages"] == [("tickets.purchased", event, b"3", True)]
-
-
-@pytest.mark.asyncio
-async def test_publisher_cleans_up_after_start_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(kafka_module, "KafkaBroker", FakeBrokerFactory(captured, fail_start=True))
-    publisher = KafkaPurchasePublisher(KafkaSettings())
-
-    with pytest.raises(RuntimeError, match="Kafka unavailable"):
-        await publisher.start()
-
-    assert captured["started"] is True
-    assert captured["stopped"] is True
-    await publisher.stop()
-
-
-@pytest.mark.asyncio
-async def test_publisher_rejects_publish_before_start() -> None:
-    publisher = KafkaPurchasePublisher(KafkaSettings())
-
-    with pytest.raises(RuntimeError, match="producer не запущен"):
-        await publisher.publish(build_event())
