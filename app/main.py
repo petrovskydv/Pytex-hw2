@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
         app.state.event_view_queue = event_view_queue
 
         purchase_event_generator = PurchaseEventGenerator(
-            purchase_publisher.publish,
+            purchase_publisher,
             interval_seconds=settings.purchase_generator.interval_seconds,
             event_id_max=settings.purchase_generator.event_id_max,
         )
