@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from faststream.kafka import KafkaBroker
 from redis import asyncio as aioredis
 
 from app.api.routes import bookings, events, locations, organizer
@@ -25,7 +26,11 @@ async def lifespan(app: FastAPI):
         socket_timeout=settings.redis.socket_timeout_seconds,
     )
     http_client = httpx.AsyncClient()
-    purchase_publisher = KafkaPurchasePublisher(settings.kafka)
+    kafka_broker = KafkaBroker(
+        settings.kafka.bootstrap_servers,
+        linger_ms=settings.kafka.linger_ms,
+    )
+    purchase_publisher = KafkaPurchasePublisher(kafka_broker, settings.kafka.topic)
     event_view_queue: EventViewQueue | None = None
     purchase_event_generator: PurchaseEventGenerator | None = None
     try:
@@ -38,8 +43,9 @@ async def lifespan(app: FastAPI):
         await redis.ping()
         await reports_broker.startup()
         await insurance_broker.startup()
-        await purchase_publisher.start()
+        await kafka_broker.start()
         app.state.redis = redis
+        app.state.kafka_broker = kafka_broker
         app.state.purchase_publisher = purchase_publisher
 
         event_view_queue = EventViewQueue(
@@ -65,7 +71,7 @@ async def lifespan(app: FastAPI):
                 await purchase_event_generator.stop()
         finally:
             try:
-                await purchase_publisher.stop()
+                await kafka_broker.stop()
             finally:
                 try:
                     if event_view_queue:
