@@ -1,7 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from functools import partial
 
 from fastapi import FastAPI
 
@@ -11,7 +10,7 @@ from monitoring.domain.dto import PaymentActivityAggregate
 from monitoring.infrastructure.database.db import engine, session_factory
 from monitoring.infrastructure.database.repositories.payment_activity import PaymentActivityRepository
 from monitoring.infrastructure.kafka import MonitoringKafka
-from monitoring.services.purchase_batches import process_purchase_batch
+from monitoring.services.purchase_batches import PurchaseBatchProcessor
 from monitoring.services.websocket_delivery import (
     PaymentActivityWebSocketWorker,
     WebSocketConnectionManager,
@@ -22,7 +21,7 @@ from monitoring.services.websocket_delivery import (
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     repository = PaymentActivityRepository(session_factory)
-    batch_handler = partial(process_purchase_batch, save_aggregates=repository.save_batch)
+    processor = PurchaseBatchProcessor(repository)
     payment_activity_queue: asyncio.Queue[list[PaymentActivityAggregate]] = asyncio.Queue()
     websocket_manager = WebSocketConnectionManager()
     websocket_worker = PaymentActivityWebSocketWorker(
@@ -30,7 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         websocket_manager,
         settings.websocket.send_timeout_seconds,
     )
-    kafka = MonitoringKafka(settings.kafka, batch_handler, payment_activity_queue)
+    kafka = MonitoringKafka(settings.kafka, processor, payment_activity_queue)
 
     try:
         websocket_worker.start()
