@@ -1,0 +1,21 @@
+name: Update FastStream lock
+
+on:
+  push:
+    branches: [hw-5]
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hw-5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+      - run: uv lock --python 3.13
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uv-lock
+          path: uv.lock
