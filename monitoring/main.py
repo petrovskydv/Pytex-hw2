@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from faststream.kafka import KafkaBroker
 
 from monitoring.api.routes import router
 from monitoring.config import get_settings
@@ -29,11 +30,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         websocket_manager,
         settings.websocket.send_timeout_seconds,
     )
-    kafka = MonitoringKafka(settings.kafka, processor, payment_activity_queue)
+    kafka_broker = KafkaBroker(
+        settings.kafka.bootstrap_servers,
+        consumer_only=True,
+    )
+    kafka = MonitoringKafka(
+        kafka_broker,
+        settings.kafka,
+        processor,
+        payment_activity_queue,
+    )
 
     try:
         websocket_worker.start()
-        await kafka.start()
+        await kafka_broker.start()
+        app.state.kafka_broker = kafka_broker
         app.state.kafka = kafka
         app.state.payment_activity_queue = payment_activity_queue
         app.state.websocket_manager = websocket_manager
@@ -41,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         try:
-            await kafka.stop()
+            await kafka_broker.stop()
         finally:
             try:
                 await websocket_worker.stop()
