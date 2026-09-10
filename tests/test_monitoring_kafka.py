@@ -7,9 +7,8 @@ from uuid import uuid4
 import pytest
 
 import monitoring.main as monitoring_main
-from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings, WebSocketSettings
-from monitoring.domain.dto import PaymentActivityAggregate
+from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
 from monitoring.infrastructure.kafka import (
     MonitoringKafka,
     collect_purchase_batch,
