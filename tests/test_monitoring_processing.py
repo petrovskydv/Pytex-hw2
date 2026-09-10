@@ -44,6 +44,7 @@ def make_aggregate(
 
 
 def test_aggregate_purchase_batch_groups_by_event_id() -> None:
+    """Проверяет группировку покупок по event_id и суммирование платежей, билетов и суммы."""
     batch = [
         make_purchase_event(3, tickets_count=2, total_amount=4000),
         make_purchase_event(1, tickets_count=1, total_amount=3000),
@@ -62,11 +63,13 @@ def test_aggregate_purchase_batch_groups_by_event_id() -> None:
 
 
 def test_aggregate_purchase_batch_returns_empty_list_for_empty_batch() -> None:
+    """Проверяет, что пустой Kafka batch не создаёт агрегатов."""
     assert aggregate_purchase_batch([]) == []
 
 
 @pytest.mark.asyncio
 async def test_purchase_batch_processor_saves_and_returns_aggregates() -> None:
+    """Проверяет, что processor агрегирует batch, сохраняет результат и возвращает те же агрегаты."""
     batch = [
         make_purchase_event(2, tickets_count=1, total_amount=1500),
         make_purchase_event(2, tickets_count=2, total_amount=3000),
@@ -86,6 +89,7 @@ async def test_purchase_batch_processor_saves_and_returns_aggregates() -> None:
 async def test_save_batch_persists_all_aggregates_in_one_batch(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Проверяет сохранение всех агрегатов Kafka batch одной группой с общими batch_id и created_at."""
     repository = PaymentActivityRepository(session_factory)
     aggregates = [
         make_aggregate(3, payments_count=3, tickets_count=6, total_amount=12000),
@@ -113,6 +117,7 @@ async def test_save_batch_persists_all_aggregates_in_one_batch(
 async def test_save_batch_uses_new_batch_id_for_next_batch(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Проверяет, что каждый новый обработанный Kafka batch получает новый UUID batch_id."""
     repository = PaymentActivityRepository(session_factory)
 
     first_batch_id = await repository.save_batch([make_aggregate(1)])
@@ -127,6 +132,7 @@ async def test_save_batch_uses_new_batch_id_for_next_batch(
 async def test_save_batch_rolls_back_all_rows_on_error(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Проверяет атомарность: ошибка одной строки откатывает все агрегаты текущего batch."""
     repository = PaymentActivityRepository(session_factory)
     invalid_aggregate = PaymentActivityAggregate.model_construct(
         event_id=None,
