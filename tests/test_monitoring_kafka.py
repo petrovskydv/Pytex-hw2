@@ -124,6 +124,7 @@ def make_aggregate(event_id: int) -> PaymentActivityAggregate:
 
 @pytest.mark.asyncio
 async def test_monitoring_lifespan_owns_kafka_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверяет создание Kafka broker в lifespan, его запуск, остановку и освобождение БД."""
     calls: list[str] = []
     broker = FakeKafka(calls)
     consumer = object()
@@ -155,6 +156,7 @@ async def test_monitoring_lifespan_owns_kafka_broker(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверяет cleanup Kafka и подключения к БД, если broker не смог запуститься."""
     calls: list[str] = []
     broker = FakeKafka(calls, fail_start=True)
 
@@ -172,6 +174,7 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch
 
 
 def test_faststream_subscriber_uses_injected_broker_and_required_settings() -> None:
+    """Проверяет регистрацию batch subscriber на переданном broker с параметрами из задания."""
     captured: dict[str, Any] = {}
     broker = FakeBroker(captured)
     connection = MonitoringKafka(
@@ -195,6 +198,7 @@ def test_faststream_subscriber_uses_injected_broker_and_required_settings() -> N
 
 @pytest.mark.asyncio
 async def test_monitoring_acks_and_enqueues_only_after_database_commit() -> None:
+    """Проверяет обязательный порядок: commit БД, затем Kafka ACK, затем asyncio.Queue."""
     order: list[str] = []
     aggregates = [make_aggregate(1), make_aggregate(2)]
     queue = RecordingPaymentActivityQueue(order)
@@ -218,6 +222,7 @@ async def test_monitoring_acks_and_enqueues_only_after_database_commit() -> None
 
 @pytest.mark.asyncio
 async def test_monitoring_nacks_without_enqueuing_after_database_error() -> None:
+    """Проверяет NACK и отсутствие данных в asyncio.Queue при ошибке сохранения batch в БД."""
     order: list[str] = []
     queue = RecordingPaymentActivityQueue(order)
     captured: dict[str, Any] = {}
