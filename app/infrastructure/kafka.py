@@ -1,48 +1,20 @@
 from faststream.kafka import KafkaBroker
 
-from app.config import KafkaSettings
 from app.domain.dto import TicketPurchasedEvent
 
 
 class KafkaPurchasePublisher:
     """Публикует события о состоявшихся покупках в Kafka."""
 
-    def __init__(self, settings: KafkaSettings) -> None:
-        self._settings = settings
-        self._broker = KafkaBroker(
-            settings.bootstrap_servers,
-            linger_ms=settings.linger_ms,
-        )
-        self._started = False
-
-    async def start(self) -> None:
-        """Подключает producer к Kafka."""
-        if self._started:
-            return
-
-        try:
-            await self._broker.start()
-        except BaseException:
-            await self._broker.stop()
-            raise
-        self._started = True
-
-    async def stop(self) -> None:
-        """Сбрасывает накопленные сообщения и закрывает producer."""
-        if not self._started:
-            return
-
-        self._started = False
-        await self._broker.stop()
+    def __init__(self, broker: KafkaBroker, topic: str) -> None:
+        self._broker = broker
+        self._topic = topic
 
     async def publish(self, event: TicketPurchasedEvent) -> None:
-        """Ставит факт покупки в буфер Kafka producer."""
-        if not self._started:
-            raise RuntimeError("Kafka producer не запущен")
-
+        """Публикует факт покупки в Kafka."""
         await self._broker.publish(
             event,
-            topic=self._settings.topic,
+            topic=self._topic,
             key=str(event.event_id).encode(),
             no_confirm=True,
         )
