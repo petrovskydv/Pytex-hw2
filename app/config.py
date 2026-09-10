@@ -77,6 +77,38 @@ class TaskiqSettings(BaseModel):
     """Задержка между двумя фоновыми попытками расчёта защиты."""
 
 
+class KafkaSettings(BaseModel):
+    """Настройки Kafka для событий о покупках билетов."""
+
+    bootstrap_servers: str = "localhost:9092"
+    """Адрес Kafka broker для подключения producer и consumer."""
+
+    topic: str = "tickets.purchased"
+    """Topic доменного события о состоявшейся покупке билетов."""
+
+    linger_ms: PositiveInt = 75
+    """Окно накопления сообщений producer перед сетевой отправкой."""
+
+    consumer_group: str = "payment-monitor"
+    """Consumer group сервиса мониторинга покупок."""
+
+    max_records: PositiveInt = 10
+    """Максимальное число событий в одном batch."""
+
+    batch_timeout_ms: PositiveInt = 500
+    """Максимальное ожидание неполного batch в миллисекундах."""
+
+
+class PurchaseGeneratorSettings(BaseModel):
+    """Настройки фонового генератора тестовых покупок."""
+
+    interval_seconds: PositiveFloat = 0.05
+    """Пауза между покупками; 50 мс создают до десяти событий за 500 мс."""
+
+    event_id_max: PositiveInt = 5
+    """Верхняя граница небольшого диапазона event_id, начиная с 1."""
+
+
 class Settings(BaseSettings):
     """Конфигурация приложения."""
 
@@ -89,7 +121,7 @@ class Settings(BaseSettings):
     """Настройки Redis."""
 
     external_apis: ExternalApiSettings
-    """Настройки внешних API."""
+    """Адреса внешних API."""
 
     booking: BookingSettings
     """Настройки бронирования."""
@@ -101,7 +133,13 @@ class Settings(BaseSettings):
     """Настройки батчинга просмотров."""
 
     taskiq: TaskiqSettings = TaskiqSettings()
-    """Настройки фоновых задач."""
+    """Настройки фоновых задач TaskIQ."""
+
+    kafka: KafkaSettings = KafkaSettings()
+    """Настройки Kafka и потока событий о покупках."""
+
+    purchase_generator: PurchaseGeneratorSettings = PurchaseGeneratorSettings()
+    """Настройки фонового генератора тестовых покупок."""
 
     @model_validator(mode="after")
     def validate_event_lock_timeout(self) -> "Settings":

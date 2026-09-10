@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -100,3 +101,13 @@ class EventDashboardDTO(BaseModel):
     event: DashboardEventDTO
     sales: SalesDashboardDTO
     occupancy: OccupancyDashboardDTO
+
+
+class TicketPurchasedEvent(BaseModel):
+    """Факт состоявшейся покупки билетов для публикации в брокер."""
+
+    payment_id: UUID
+    event_id: int
+    tickets_count: int
+    total_amount: int
+    paid_at: datetime

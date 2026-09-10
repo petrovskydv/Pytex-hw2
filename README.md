@@ -19,7 +19,7 @@
 3. Запустите инфраструктуру:
 
    ```bash
-   docker compose up -d db payment-api protection-api redis
+   docker compose up -d db payment-api protection-api redis kafka kafka-init kafka-ui
    ```
 
 4. Примените миграции:
@@ -53,7 +53,59 @@ uv run taskiq scheduler --skip-first-run app.background.brokers:scheduler app.ba
 
 Scheduler должен запускаться только в одном экземпляре. PDF-отчёты сохраняются в каталог `reports/`.
 
-Весь стек вместе с миграцией, API, workers и scheduler можно запустить одной командой:
+### Kafka
+
+Для событий о покупках используется Kafka в single-node KRaft-конфигурации. С хоста broker доступен как
+`localhost:9092`, из сервисов Docker Compose — как `kafka:19092`.
+
+Одноразовый сервис `kafka-init` создаёт topic `tickets.purchased` до запуска producer и consumer. Topic создаётся
+с двумя partitions и replication factor 1. `app` и `monitoring` стартуют только после успешного завершения
+`kafka-init`.
+
+Kafka UI доступен по адресу http://localhost:8080. Он подключён к локальному кластеру `afisha-local` через
+`kafka:19092` и позволяет смотреть topics, partitions, сообщения и consumer groups.
+
+Параметры Kafka недели 5 вынесены в секцию `KAFKA__*`: topic `tickets.purchased`, `linger_ms=75`, batch до 10
+сообщений с ожиданием не более 500 мс. Таймаут WebSocket-отправки задаётся отдельно через
+`WEBSOCKET__SEND_TIMEOUT_SECONDS` и не может превышать 2 секунды.
+
+Для работы с Kafka используется FastStream поверх `aiokafka`.
+
+### Генератор тестовых покупок
+
+Основное приложение запускает через FastAPI lifespan фоновый генератор тестовых покупок. Каждое событие содержит
+`payment_id`, `event_id`, `tickets_count`, `total_amount` и `paid_at`. По умолчанию событие создаётся каждые 50 мс,
+а `event_id` выбирается из диапазона 1–5, поэтому за окно 500 мс может появиться несколько покупок, в том числе
+для одного мероприятия.
+
+Параметры генератора задаются через `PURCHASE_GENERATOR__INTERVAL_SECONDS` и
+`PURCHASE_GENERATOR__EVENT_ID_MAX`.
+
+### Публикация событий о покупках
+
+Основное приложение создаёт FastStream `KafkaBroker` в lifespan и публикует каждую сгенерированную покупку как факт
+`tickets.purchased`. Producer использует `KAFKA__LINGER_MS=75`; публикация не ждёт broker confirmation, чтобы события
+могли накапливаться в producer buffer. При shutdown сначала останавливается генератор, затем Kafka broker закрывает
+producer.
+
+### Сервис мониторинга покупок
+
+Monitoring — отдельное FastAPI-приложение с собственными подключениями к PostgreSQL и Kafka. FastStream subscriber
+получает `tickets.purchased` батчами до 10 сообщений или 500 мс и использует manual acknowledgement. Батч сразу
+агрегируется по `event_id` и сохраняется одной транзакцией PostgreSQL. Kafka offset подтверждается только после
+успешного commit БД; затем агрегаты передаются через локальную `asyncio.Queue` отдельному WebSocket worker, который
+конкурентно рассылает их клиентам `WS /ws/payments` с таймаутом не более 2 секунд на клиента.
+
+`faststream[kafka]` является общей runtime-зависимостью основного API и monitoring-сервиса и хранится в корневом
+`pyproject.toml`; отдельного `requirements.txt` для monitoring нет.
+
+Для запуска с хоста:
+
+```bash
+uv run uvicorn monitoring.main:app --host 127.0.0.1 --port 8001
+```
+
+Весь стек вместе с миграцией, API, monitoring, workers, scheduler, Kafka и Kafka UI можно запустить одной командой:
 
 ```bash
 docker compose up --build
@@ -93,9 +145,12 @@ uv run pre-commit run --all-files
 | --- | --- |
 | PostgreSQL | `localhost:7432` |
 | Redis | `localhost:7379` |
+| Kafka | `localhost:9092` |
+| Kafka UI | http://localhost:8080 |
 | Payment API | http://localhost:9001 |
 | Protection API | http://localhost:9002 |
 | FastAPI | http://localhost:8000 |
+| Monitoring FastAPI / WebSocket | http://localhost:8001 / `ws://localhost:8001/ws/payments` |
 
 Остановить инфраструктуру:
 
