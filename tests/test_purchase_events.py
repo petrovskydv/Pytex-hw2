@@ -5,6 +5,7 @@ from uuid import UUID
 
 import pytest
 
+import app.infrastructure.kafka as kafka_module
 from app.config import KafkaSettings
 from app.domain.dto import TicketPurchasedEvent
 from app.infrastructure.kafka import KafkaPurchasePublisher
@@ -17,10 +18,15 @@ class EventCollector:
         self.events: list[TicketPurchasedEvent] = []
         self.ready = asyncio.Event()
 
-    async def __call__(self, event: TicketPurchasedEvent) -> None:
+    async def publish(self, event: TicketPurchasedEvent) -> None:
         self.events.append(event)
         if len(self.events) >= self.expected_events:
             self.ready.set()
+
+
+class NullPublisher:
+    async def publish(self, _: TicketPurchasedEvent) -> None:
+        return None
 
 
 class FakeBroker:
@@ -59,10 +65,6 @@ class FakeBrokerFactory:
         return FakeBroker(self.captured, fail_start=self.fail_start)
 
 
-async def discard_event(_: TicketPurchasedEvent) -> None:
-    return None
-
-
 def build_event() -> TicketPurchasedEvent:
     return TicketPurchasedEvent(
         payment_id=UUID("12345678-1234-5678-1234-567812345678"),
@@ -74,7 +76,7 @@ def build_event() -> TicketPurchasedEvent:
 
 
 def test_purchase_event_contains_required_fields_and_repeated_event_ids() -> None:
-    generator = PurchaseEventGenerator(discard_event, event_id_max=5)
+    generator = PurchaseEventGenerator(NullPublisher(), event_id_max=5)
     events = [generator.create_event() for _ in range(6)]
 
     assert len({event.payment_id for event in events}) == 6
@@ -114,10 +116,11 @@ async def test_purchase_generator_runs_in_background_and_stops() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publisher_configures_linger_and_partitions_by_event_id() -> None:
+async def test_publisher_configures_linger_and_publishes_event(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
+    monkeypatch.setattr(kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
     settings = KafkaSettings(bootstrap_servers="kafka:19092", topic="tickets.purchased", linger_ms=75)
-    publisher = KafkaPurchasePublisher(settings, broker_factory=FakeBrokerFactory(captured))
+    publisher = KafkaPurchasePublisher(settings)
     event = build_event()
 
     await publisher.start()
@@ -132,12 +135,10 @@ async def test_publisher_configures_linger_and_partitions_by_event_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publisher_cleans_up_after_start_error() -> None:
+async def test_publisher_cleans_up_after_start_error(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
-    publisher = KafkaPurchasePublisher(
-        KafkaSettings(),
-        broker_factory=FakeBrokerFactory(captured, fail_start=True),
-    )
+    monkeypatch.setattr(kafka_module, "KafkaBroker", FakeBrokerFactory(captured, fail_start=True))
+    publisher = KafkaPurchasePublisher(KafkaSettings())
 
     with pytest.raises(RuntimeError, match="Kafka unavailable"):
         await publisher.start()
@@ -149,7 +150,7 @@ async def test_publisher_cleans_up_after_start_error() -> None:
 
 @pytest.mark.asyncio
 async def test_publisher_rejects_publish_before_start() -> None:
-    publisher = KafkaPurchasePublisher(KafkaSettings(), broker_factory=FakeBrokerFactory({}))
+    publisher = KafkaPurchasePublisher(KafkaSettings())
 
     with pytest.raises(RuntimeError, match="producer не запущен"):
         await publisher.publish(build_event())
