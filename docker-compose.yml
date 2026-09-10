@@ -89,6 +89,39 @@ services:
       retries: 12
       start_period: 10s
 
+  kafka-init:
+    image: apache/kafka:4.3.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        KAFKA_TOPICS=/opt/kafka/bin/kafka-topics.sh
+        for i in {1..30}; do
+          $$KAFKA_TOPICS --bootstrap-server kafka:19092 --list >/dev/null 2>&1 && break
+          sleep 2
+        done
+        $$KAFKA_TOPICS --bootstrap-server kafka:19092 \
+          --create --if-not-exists \
+          --topic tickets.purchased \
+          --partitions 2 \
+          --replication-factor 1
+        $$KAFKA_TOPICS --bootstrap-server kafka:19092 \
+          --alter --topic tickets.purchased --partitions 2 || true
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: afisha-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+    ports:
+      - "8080:8080"
+
   migrate:
     <<: *app-service
     command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
@@ -112,8 +145,8 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
 
   monitoring:
     build: .
@@ -131,8 +164,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      kafka:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
 
   worker-reports:
     <<: *app-service
