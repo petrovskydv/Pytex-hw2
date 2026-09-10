@@ -1,13 +1,11 @@
 import asyncio
-from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from random import randint
 from uuid import uuid4
 
 from app.domain.dto import TicketPurchasedEvent
-
-PurchaseEventSink = Callable[[TicketPurchasedEvent], Awaitable[None]]
+from app.infrastructure.kafka import KafkaPurchasePublisher
 
 
 class PurchaseEventGenerator:
@@ -15,12 +13,12 @@ class PurchaseEventGenerator:
 
     def __init__(
         self,
-        sink: PurchaseEventSink,
+        publisher: KafkaPurchasePublisher,
         *,
         interval_seconds: float = 0.05,
         event_id_max: int = 5,
     ) -> None:
-        self._sink = sink
+        self._publisher = publisher
         self._interval_seconds = interval_seconds
         self._event_id_max = event_id_max
         self._task: asyncio.Task[None] | None = None
@@ -56,5 +54,5 @@ class PurchaseEventGenerator:
 
     async def _run(self) -> None:
         while True:
-            await self._sink(self.create_event())
+            await self._publisher.publish(self.create_event())
             await asyncio.sleep(self._interval_seconds)
