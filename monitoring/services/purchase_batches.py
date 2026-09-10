@@ -1,12 +1,9 @@
 import logging
-from collections.abc import Awaitable, Callable
-from uuid import UUID
 
 from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
+from monitoring.infrastructure.database.repositories.payment_activity import PaymentActivityRepository
 
 logger = logging.getLogger(__name__)
-
-SavePaymentActivityBatch = Callable[[list[PaymentActivityAggregate]], Awaitable[UUID]]
 
 
 def aggregate_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
@@ -25,18 +22,19 @@ def aggregate_purchase_batch(batch: list[TicketPurchasedEvent]) -> list[PaymentA
     return [PaymentActivityAggregate(event_id=event_id, **aggregate) for event_id, aggregate in counters.items()]
 
 
-async def process_purchase_batch(
-    batch: list[TicketPurchasedEvent],
-    *,
-    save_aggregates: SavePaymentActivityBatch,
-) -> list[PaymentActivityAggregate]:
+class PurchaseBatchProcessor:
     """Агрегирует Kafka-батч и сохраняет результат в PostgreSQL."""
-    aggregates = aggregate_purchase_batch(batch)
-    batch_id = await save_aggregates(aggregates)
-    logger.info(
-        "Обработан батч покупок %s: %s сообщений, %s мероприятий",
-        batch_id,
-        len(batch),
-        len(aggregates),
-    )
-    return aggregates
+
+    def __init__(self, repository: PaymentActivityRepository) -> None:
+        self._repository = repository
+
+    async def process(self, batch: list[TicketPurchasedEvent]) -> list[PaymentActivityAggregate]:
+        aggregates = aggregate_purchase_batch(batch)
+        batch_id = await self._repository.save_batch(aggregates)
+        logger.info(
+            "Обработан батч покупок %s: %s сообщений, %s мероприятий",
+            batch_id,
+            len(batch),
+            len(aggregates),
+        )
+        return aggregates
