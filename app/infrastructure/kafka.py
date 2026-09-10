@@ -52,5 +52,6 @@ class KafkaPurchasePublisher:
         await self._broker.publish(
             event,
             topic=self._settings.topic,
+            key=str(event.event_id).encode(),
             no_confirm=True,
         )
