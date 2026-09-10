@@ -13,6 +13,7 @@ from monitoring.services.websocket_delivery import (
     PaymentActivityWebSocketWorker,
     WebSocketConnectionManager,
 )
+from tests.factories import make_aggregate
 
 
 class FakeWebSocket:
@@ -40,15 +41,6 @@ class FakeWebSocket:
         if self.send_error is not None:
             raise self.send_error
         self.sent_messages.append(message)
-
-
-def make_aggregate(event_id: int = 3) -> PaymentActivityAggregate:
-    return PaymentActivityAggregate(
-        event_id=event_id,
-        payments_count=2,
-        tickets_count=6,
-        total_amount=12000,
-    )
 
 
 def test_payments_websocket_route_is_registered() -> None:
@@ -119,9 +111,9 @@ async def test_websocket_worker_reads_queue_and_sends_saved_aggregates() -> None
             "items": [
                 {
                     "event_id": 3,
-                    "payments_count": 2,
-                    "tickets_count": 6,
-                    "total_amount": 12000,
+                    "payments_count": 1,
+                    "tickets_count": 1,
+                    "total_amount": 1000,
                 }
             ],
         }
