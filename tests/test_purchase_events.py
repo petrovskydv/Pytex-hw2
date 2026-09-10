@@ -54,6 +54,7 @@ def build_event() -> TicketPurchasedEvent:
 
 
 def test_purchase_event_contains_required_fields_and_repeated_event_ids() -> None:
+    """Проверяет состав события покупки, уникальность payment_id и возможность повторения event_id."""
     generator = PurchaseEventGenerator(NullPublisher(), event_id_max=5)
     events = [generator.create_event() for _ in range(6)]
 
@@ -77,6 +78,7 @@ def test_purchase_event_contains_required_fields_and_repeated_event_ids() -> Non
 
 @pytest.mark.asyncio
 async def test_purchase_generator_runs_in_background_and_stops() -> None:
+    """Проверяет фоновую генерацию нескольких покупок и прекращение публикации после stop()."""
     collector = EventCollector(expected_events=3)
     generator = PurchaseEventGenerator(collector, interval_seconds=0.001, event_id_max=5)
 
@@ -95,6 +97,7 @@ async def test_purchase_generator_runs_in_background_and_stops() -> None:
 
 @pytest.mark.asyncio
 async def test_publisher_uses_injected_broker_and_event_id_key() -> None:
+    """Проверяет публикацию через переданный broker в нужный topic с Kafka key из event_id."""
     captured: dict[str, Any] = {}
     broker = FakeBroker(captured)
     publisher = KafkaPurchasePublisher(broker, "tickets.purchased")
