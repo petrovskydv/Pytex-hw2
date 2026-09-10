@@ -21,7 +21,8 @@ jobs:
         run: docker compose up -d kafka kafka-init kafka-ui
       - name: Verify kafka-init and topic
         run: |
-          test "$(docker inspect -f '{{.State.ExitCode}}' $(docker compose ps -q kafka-init))" = "0"
+          docker compose wait kafka-init
+          test "$(docker inspect -f '{{.State.ExitCode}}' $(docker compose ps -aq kafka-init))" = "0"
           docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
             --bootstrap-server kafka:19092 \
             --describe --topic tickets.purchased | tee /tmp/topic.txt
