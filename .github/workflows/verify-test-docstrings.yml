@@ -1,0 +1,48 @@
+name: Verify test docstrings
+
+on:
+  push:
+    branches: [hw-5]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hw-5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+      - run: uv sync --python 3.13 --frozen
+      - run: cp .env.example .env
+      - name: Verify Russian docstrings in week 5 tests
+        run: |
+          uv run python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          paths = [
+              Path("tests/test_monitoring_kafka.py"),
+              Path("tests/test_monitoring_processing.py"),
+              Path("tests/test_monitoring_websocket.py"),
+              Path("tests/test_purchase_events.py"),
+          ]
+          tests = []
+          missing = []
+          for path in paths:
+              tree = ast.parse(path.read_text(encoding="utf-8"))
+              for node in ast.walk(tree):
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                      tests.append((path, node.name))
+                      docstring = ast.get_docstring(node)
+                      if not docstring or not any("а" <= char.lower() <= "я" or char.lower() == "ё" for char in docstring):
+                          missing.append((path, node.name))
+          assert len(tests) == 20, tests
+          assert not missing, missing
+          print(f"Verified {len(tests)} Russian test docstrings")
+          PY
+      - run: uv run ruff check tests/test_monitoring_kafka.py tests/test_monitoring_processing.py tests/test_monitoring_websocket.py tests/test_purchase_events.py
+      - run: uv run ruff format --check tests/test_monitoring_kafka.py tests/test_monitoring_processing.py tests/test_monitoring_websocket.py tests/test_purchase_events.py
+      - run: uv run pytest tests/test_monitoring_kafka.py tests/test_monitoring_processing.py tests/test_monitoring_websocket.py tests/test_purchase_events.py
+      - run: uv run pytest
