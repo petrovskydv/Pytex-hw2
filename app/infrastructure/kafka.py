@@ -1,24 +1,15 @@
-from collections.abc import Callable
-from typing import Any
-
 from faststream.kafka import KafkaBroker
 
 from app.config import KafkaSettings
 from app.domain.dto import TicketPurchasedEvent
 
-BrokerFactory = Callable[..., Any]
-
 
 class KafkaPurchasePublisher:
     """Публикует события о состоявшихся покупках в Kafka."""
 
-    def __init__(
-        self,
-        settings: KafkaSettings,
-        broker_factory: BrokerFactory = KafkaBroker,
-    ) -> None:
+    def __init__(self, settings: KafkaSettings) -> None:
         self._settings = settings
-        self._broker = broker_factory(
+        self._broker = KafkaBroker(
             settings.bootstrap_servers,
             linger_ms=settings.linger_ms,
         )
