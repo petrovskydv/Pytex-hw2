@@ -7,9 +7,8 @@ from typing import Any
 
 from aiokafka import AIOKafkaConsumer
 
-from app.domain.dto import TicketPurchasedEvent
 from monitoring.config import KafkaSettings
-from monitoring.domain.dto import PaymentActivityAggregate
+from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
 
 logger = logging.getLogger(__name__)
 
