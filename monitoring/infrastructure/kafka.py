@@ -1,18 +1,14 @@
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from typing import Any
 
 from faststream import AckPolicy
 from faststream.kafka import KafkaBroker, KafkaMessage
 
 from monitoring.config import KafkaSettings
 from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
+from monitoring.services.purchase_batches import PurchaseBatchProcessor
 
 logger = logging.getLogger(__name__)
-
-BrokerFactory = Callable[..., Any]
-PurchaseBatchHandler = Callable[[list[TicketPurchasedEvent]], Awaitable[list[PaymentActivityAggregate]]]
 
 
 class MonitoringKafka:
@@ -21,13 +17,12 @@ class MonitoringKafka:
     def __init__(
         self,
         settings: KafkaSettings,
-        batch_handler: PurchaseBatchHandler,
+        processor: PurchaseBatchProcessor,
         payment_activity_queue: asyncio.Queue[list[PaymentActivityAggregate]],
-        broker_factory: BrokerFactory = KafkaBroker,
     ) -> None:
-        self._batch_handler = batch_handler
+        self._processor = processor
         self._payment_activity_queue = payment_activity_queue
-        self._broker = broker_factory(
+        self._broker = KafkaBroker(
             settings.bootstrap_servers,
             consumer_only=True,
         )
@@ -56,7 +51,7 @@ class MonitoringKafka:
         message: KafkaMessage,
     ) -> None:
         try:
-            aggregates = await self._batch_handler(batch)
+            aggregates = await self._processor.process(batch)
         except Exception:
             await message.nack()
             logger.exception("Не удалось обработать Kafka-батч; offsets не подтверждены")
