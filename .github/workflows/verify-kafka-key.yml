@@ -15,11 +15,11 @@ jobs:
         with:
           version: "0.10.0"
       - run: uv sync --python 3.13 --frozen
+      - run: cp .env.example .env
       - run: uv run ruff check app/infrastructure/kafka.py tests/test_purchase_events.py
       - run: uv run ruff format --check app/infrastructure/kafka.py tests/test_purchase_events.py
       - run: uv run pytest tests/test_purchase_events.py
       - run: uv run pytest
-      - run: cp .env.example .env
       - name: Start Kafka and create topic
         run: |
           docker compose up -d kafka kafka-init
