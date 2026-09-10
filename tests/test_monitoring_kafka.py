@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 from faststream import AckPolicy
 
-import monitoring.infrastructure.kafka as monitoring_kafka_module
 import monitoring.main as monitoring_main
 from monitoring.config import KafkaSettings, WebSocketSettings
 from monitoring.domain.dto import PaymentActivityAggregate, TicketPurchasedEvent
@@ -54,22 +53,6 @@ class FakeBroker:
         self.captured["subscriber_args"] = args
         self.captured["subscriber_kwargs"] = kwargs
         return FakeSubscriber(self.captured)
-
-    async def start(self) -> None:
-        self.captured["started"] = True
-
-    async def stop(self) -> None:
-        self.captured["stopped"] = True
-
-
-class FakeBrokerFactory:
-    def __init__(self, captured: dict[str, Any]) -> None:
-        self.captured = captured
-
-    def __call__(self, *args: Any, **kwargs: Any) -> FakeBroker:
-        self.captured["broker_args"] = args
-        self.captured["broker_kwargs"] = kwargs
-        return FakeBroker(self.captured)
 
 
 class FakeMessage:
@@ -140,30 +123,44 @@ def make_aggregate(event_id: int) -> PaymentActivityAggregate:
 
 
 @pytest.mark.asyncio
-async def test_monitoring_lifespan_owns_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_monitoring_lifespan_owns_kafka_broker(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
-    kafka = FakeKafka(calls)
+    broker = FakeKafka(calls)
+    consumer = object()
+    captured: dict[str, Any] = {}
+
+    def create_broker(*args: Any, **kwargs: Any) -> FakeKafka:
+        captured["broker_args"] = args
+        captured["broker_kwargs"] = kwargs
+        return broker
+
     monkeypatch.setattr(monitoring_main, "get_settings", make_settings)
-    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _processor, _queue: kafka)
+    monkeypatch.setattr(monitoring_main, "KafkaBroker", create_broker)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _broker, _settings, _processor, _queue: consumer)
     monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
 
     app = monitoring_main.app
     async with app.router.lifespan_context(app):
-        assert app.state.kafka is kafka
+        assert app.state.kafka_broker is broker
+        assert app.state.kafka is consumer
         assert isinstance(app.state.payment_activity_queue, asyncio.Queue)
         assert isinstance(app.state.websocket_manager, WebSocketConnectionManager)
         assert app.state.websocket_worker is not None
         assert calls == ["kafka.start"]
 
+    assert captured["broker_args"] == ("localhost:9092",)
+    assert captured["broker_kwargs"] == {"consumer_only": True}
     assert calls == ["kafka.start", "kafka.stop", "database.dispose"]
 
 
 @pytest.mark.asyncio
 async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
-    kafka = FakeKafka(calls, fail_start=True)
+    broker = FakeKafka(calls, fail_start=True)
+
     monkeypatch.setattr(monitoring_main, "get_settings", make_settings)
-    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _settings, _processor, _queue: kafka)
+    monkeypatch.setattr(monitoring_main, "KafkaBroker", lambda *_args, **_kwargs: broker)
+    monkeypatch.setattr(monitoring_main, "MonitoringKafka", lambda _broker, _settings, _processor, _queue: object())
     monkeypatch.setattr(monitoring_main, "engine", FakeEngine(calls))
 
     app = monitoring_main.app
@@ -174,21 +171,16 @@ async def test_monitoring_lifespan_cleans_up_after_kafka_start_error(monkeypatch
     assert calls == ["kafka.start", "kafka.stop", "database.dispose"]
 
 
-@pytest.mark.asyncio
-async def test_faststream_subscriber_uses_required_batch_and_ack_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_faststream_subscriber_uses_injected_broker_and_required_settings() -> None:
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(monitoring_kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
+    broker = FakeBroker(captured)
     connection = MonitoringKafka(
+        broker,
         KafkaSettings(),
         processor=RecordingBatchProcessor([], []),
         payment_activity_queue=asyncio.Queue(),
     )
 
-    await connection.start()
-    await connection.stop()
-
-    assert captured["broker_args"] == ("localhost:9092",)
-    assert captured["broker_kwargs"] == {"consumer_only": True}
     assert captured["subscriber_args"] == ("tickets.purchased",)
     assert captured["subscriber_kwargs"] == {
         "group_id": "payment-monitor",
@@ -199,18 +191,17 @@ async def test_faststream_subscriber_uses_required_batch_and_ack_settings(monkey
         "ack_policy": AckPolicy.MANUAL,
     }
     assert captured["handler"] == connection._handle_batch
-    assert captured["started"] is True
-    assert captured["stopped"] is True
 
 
 @pytest.mark.asyncio
-async def test_monitoring_acks_and_enqueues_only_after_database_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_monitoring_acks_and_enqueues_only_after_database_commit() -> None:
     order: list[str] = []
     aggregates = [make_aggregate(1), make_aggregate(2)]
     queue = RecordingPaymentActivityQueue(order)
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(monitoring_kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
+    broker = FakeBroker(captured)
     MonitoringKafka(
+        broker,
         KafkaSettings(),
         processor=RecordingBatchProcessor(order, aggregates),
         payment_activity_queue=queue,
@@ -226,12 +217,13 @@ async def test_monitoring_acks_and_enqueues_only_after_database_commit(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_monitoring_nacks_without_enqueuing_after_database_error(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_monitoring_nacks_without_enqueuing_after_database_error() -> None:
     order: list[str] = []
     queue = RecordingPaymentActivityQueue(order)
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(monitoring_kafka_module, "KafkaBroker", FakeBrokerFactory(captured))
+    broker = FakeBroker(captured)
     MonitoringKafka(
+        broker,
         KafkaSettings(),
         processor=FailingBatchProcessor(order),
         payment_activity_queue=queue,
