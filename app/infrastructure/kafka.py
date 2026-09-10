@@ -1,12 +1,12 @@
 from collections.abc import Callable
 from typing import Any
 
-from aiokafka import AIOKafkaProducer
+from faststream.kafka import KafkaBroker
 
 from app.config import KafkaSettings
 from app.domain.dto import TicketPurchasedEvent
 
-ProducerFactory = Callable[..., Any]
+BrokerFactory = Callable[..., Any]
 
 
 class KafkaPurchasePublisher:
@@ -15,43 +15,42 @@ class KafkaPurchasePublisher:
     def __init__(
         self,
         settings: KafkaSettings,
-        producer_factory: ProducerFactory = AIOKafkaProducer,
+        broker_factory: BrokerFactory = KafkaBroker,
     ) -> None:
         self._settings = settings
-        self._producer_factory = producer_factory
-        self._producer: Any | None = None
+        self._broker = broker_factory(
+            settings.bootstrap_servers,
+            linger_ms=settings.linger_ms,
+        )
+        self._started = False
 
     async def start(self) -> None:
         """Подключает producer к Kafka."""
-        if self._producer is not None:
+        if self._started:
             return
 
-        producer = self._producer_factory(
-            bootstrap_servers=self._settings.bootstrap_servers,
-            linger_ms=self._settings.linger_ms,
-        )
-        self._producer = producer
         try:
-            await producer.start()
+            await self._broker.start()
         except BaseException:
-            self._producer = None
-            await producer.stop()
+            await self._broker.stop()
             raise
+        self._started = True
 
     async def stop(self) -> None:
         """Сбрасывает накопленные сообщения и закрывает producer."""
-        producer = self._producer
-        self._producer = None
-        if producer is not None:
-            await producer.stop()
+        if not self._started:
+            return
+
+        self._started = False
+        await self._broker.stop()
 
     async def publish(self, event: TicketPurchasedEvent) -> None:
         """Ставит факт покупки в буфер Kafka producer."""
-        producer = self._producer
-        if producer is None:
+        if not self._started:
             raise RuntimeError("Kafka producer не запущен")
 
-        await producer.send(
-            self._settings.topic,
-            event.model_dump_json().encode("utf-8"),
+        await self._broker.publish(
+            event,
+            topic=self._settings.topic,
+            no_confirm=True,
         )
