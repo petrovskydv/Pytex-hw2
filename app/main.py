@@ -66,23 +66,18 @@ async def lifespan(app: FastAPI):
         app.state.purchase_event_generator = purchase_event_generator
         yield
     finally:
-        try:
-            if purchase_event_generator:
-                await purchase_event_generator.stop()
-        finally:
-            try:
-                await kafka_broker.stop()
-            finally:
-                try:
-                    if event_view_queue:
-                        await event_view_queue.stop()
-                finally:
-                    try:
-                        await reports_broker.shutdown()
-                        await insurance_broker.shutdown()
-                    finally:
-                        await http_client.aclose()
-                        await redis.aclose()
+        if purchase_event_generator:
+            await purchase_event_generator.stop()
+
+        await kafka_broker.stop()
+
+        if event_view_queue:
+            await event_view_queue.stop()
+
+        await reports_broker.shutdown()
+        await insurance_broker.shutdown()
+        await http_client.aclose()
+        await redis.aclose()
 
 
 app = FastAPI(title="API Афиши", lifespan=lifespan)
