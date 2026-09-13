@@ -1,4 +1,3 @@
-from functools import lru_cache
 from typing import Annotated
 
 from pydantic import BaseModel, Field, PostgresDsn
@@ -37,6 +36,4 @@ class MonitoringSettings(BaseSettings):
     websocket: WebSocketSettings = WebSocketSettings()
 
 
-@lru_cache
-def get_settings() -> MonitoringSettings:
-    return MonitoringSettings()
+settings = MonitoringSettings()
