@@ -25,11 +25,6 @@ class WebSocketConnectionManager:
     def __init__(self) -> None:
         self._connections: set[WebSocket] = set()
 
-    @property
-    def active_count(self) -> int:
-        """Возвращает количество активных WebSocket-соединений."""
-        return len(self._connections)
-
     async def connect(self, websocket: WebSocket) -> None:
         """Принимает WebSocket-соединение и добавляет его в registry."""
         await websocket.accept()

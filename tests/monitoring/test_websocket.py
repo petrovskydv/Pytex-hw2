@@ -28,6 +28,7 @@ class FakeWebSocket:
         self.client_state = WebSocketState.CONNECTED
         self.application_state = WebSocketState.CONNECTED
         self.accepted = False
+        self.send_attempts = 0
         self.sent_messages: list[dict[str, Any]] = []
         self.send_started = asyncio.Event()
 
@@ -35,6 +36,7 @@ class FakeWebSocket:
         self.accepted = True
 
     async def send_json(self, message: dict[str, Any]) -> None:
+        self.send_attempts += 1
         self.send_started.set()
         if self.send_delay_seconds:
             await asyncio.sleep(self.send_delay_seconds)
@@ -72,7 +74,12 @@ async def test_broadcast_sends_to_clients_concurrently_and_keeps_timeout_client(
 
     assert fast.sent_messages
     assert slow.sent_messages == []
-    assert manager.active_count == 2
+
+    slow.send_delay_seconds = 0
+    await manager.broadcast([make_aggregate()], timeout_seconds=0.05)
+
+    assert slow.send_attempts == 2
+    assert slow.sent_messages
 
 
 @pytest.mark.asyncio
@@ -84,8 +91,9 @@ async def test_broadcast_removes_client_with_closed_connection_error() -> None:
     closed.application_state = WebSocketState.DISCONNECTED
 
     await manager.broadcast([make_aggregate()], timeout_seconds=0.05)
+    await manager.broadcast([make_aggregate()], timeout_seconds=0.05)
 
-    assert manager.active_count == 0
+    assert closed.send_attempts == 1
 
 
 @pytest.mark.asyncio
