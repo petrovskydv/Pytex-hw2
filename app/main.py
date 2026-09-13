@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from faststream.kafka import KafkaBroker
 from redis import asyncio as aioredis
 
 from app.api.routes import bookings, events, locations, organizer
@@ -12,7 +13,9 @@ from app.infrastructure.api_clients.payment import PaymentClient
 from app.infrastructure.api_clients.protection import ProtectionClient
 from app.infrastructure.database.add_event_data import add_event_data_to_db
 from app.infrastructure.database.db import session_factory
+from app.infrastructure.kafka import KafkaPurchasePublisher
 from app.services.event_views import EventViewQueue
+from app.services.purchase_generator import PurchaseEventGenerator
 
 
 @asynccontextmanager
@@ -23,7 +26,13 @@ async def lifespan(app: FastAPI):
         socket_timeout=settings.redis.socket_timeout_seconds,
     )
     http_client = httpx.AsyncClient()
+    kafka_broker = KafkaBroker(
+        settings.kafka.bootstrap_servers,
+        linger_ms=settings.kafka.linger_ms,
+    )
+    purchase_publisher = KafkaPurchasePublisher(kafka_broker, settings.kafka.topic)
     event_view_queue: EventViewQueue | None = None
+    purchase_event_generator: PurchaseEventGenerator | None = None
     try:
         app.state.payment_client = PaymentClient(http_client, settings.external_apis.payment_api_url)
         app.state.protection_client = ProtectionClient(http_client, settings.external_apis.protection_api_url)
@@ -34,7 +43,11 @@ async def lifespan(app: FastAPI):
         await redis.ping()
         await reports_broker.startup()
         await insurance_broker.startup()
+        await kafka_broker.start()
         app.state.redis = redis
+        app.state.kafka_broker = kafka_broker
+        app.state.purchase_publisher = purchase_publisher
+
         event_view_queue = EventViewQueue(
             redis,
             session_factory,
@@ -43,18 +56,28 @@ async def lifespan(app: FastAPI):
         )
         event_view_queue.start()
         app.state.event_view_queue = event_view_queue
+
+        purchase_event_generator = PurchaseEventGenerator(
+            purchase_publisher,
+            interval_seconds=settings.purchase_generator.interval_seconds,
+            event_id_max=settings.purchase_generator.event_id_max,
+        )
+        purchase_event_generator.start()
+        app.state.purchase_event_generator = purchase_event_generator
         yield
     finally:
-        try:
-            if event_view_queue:
-                await event_view_queue.stop()
-        finally:
-            try:
-                await reports_broker.shutdown()
-                await insurance_broker.shutdown()
-            finally:
-                await http_client.aclose()
-                await redis.aclose()
+        if purchase_event_generator:
+            await purchase_event_generator.stop()
+
+        await kafka_broker.stop()
+
+        if event_view_queue:
+            await event_view_queue.stop()
+
+        await reports_broker.shutdown()
+        await insurance_broker.shutdown()
+        await http_client.aclose()
+        await redis.aclose()
 
 
 app = FastAPI(title="API Афиши", lifespan=lifespan)

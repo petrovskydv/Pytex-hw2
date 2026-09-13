@@ -13,9 +13,7 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-seat_status = postgresql.ENUM(
-    "available", "reserved", "sold", name="seat_status", create_type=False
-)
+seat_status = postgresql.ENUM("available", "reserved", "sold", name="seat_status", create_type=False)
 booking_status = postgresql.ENUM(
     "pending_payment",
     "paid",
@@ -27,12 +25,10 @@ booking_status = postgresql.ENUM(
 
 
 def upgrade() -> None:
-    postgresql.ENUM("available", "reserved", "sold", name="seat_status").create(
+    postgresql.ENUM("available", "reserved", "sold", name="seat_status").create(op.get_bind(), checkfirst=True)
+    postgresql.ENUM("pending_payment", "paid", "cancelled", "expired", name="booking_status").create(
         op.get_bind(), checkfirst=True
     )
-    postgresql.ENUM(
-        "pending_payment", "paid", "cancelled", "expired", name="booking_status"
-    ).create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "locations",
